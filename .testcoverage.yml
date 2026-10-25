@@ -1,0 +1,8 @@
+# A function that cannot run in a test carries
+# `// coverage-ignore: <reason>` on its opening-brace line. The gate fails on a comment with no reason.
+force-annotation-comment: true
+
+exclude:
+  paths:
+    # The code that oapi-codegen generates. A second generated file adds its own line.
+    - ^internal/api/api\.gen\.go$

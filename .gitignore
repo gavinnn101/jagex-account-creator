@@ -1,0 +1,64 @@
+# If you prefer the allow list template instead of the deny list, see community template:
+# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+#
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Code coverage profiles and other test artifacts
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env
+
+# Debug screenshots
+debug_screenshots/
+
+# Compiled binary
+/creator
+
+# Editor/IDE
+# .idea/
+# .vscode/
+
+# Output with account credentials
+/accounts.jsonl
+/creator.db
+/creator.db-wal
+/creator.db-shm
+/logs/
+
+# Proxy list with credentials
+/proxies.txt
+
+# The config of each mode, the default of -config. Git tracks the template
+# config.yaml, so the real secrets and the saves of serve go here.
+/config.local.yaml
+
+# The dashboard: its dependencies, its build and the outputs of its tools.
+# Git tracks web/dist/.gitkeep, so a clean clone has a dir to embed.
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+web/.svelte-kit/
+web/.stryker-tmp/
+web/coverage/
+web/test-results/
+web/playwright-report/
+web/reports/

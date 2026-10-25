@@ -1,0 +1,30 @@
+debug: false             # Enable debug logging (DEBUG level) and screenshots
+database: "creator.db"   # The SQLite account store. Must not be empty
+
+chrome:
+  headless: true
+  timeout: 30s
+
+proxy:
+  # The proxy list is in the account store. Import it on the Proxies screen of serve mode.
+  # With false, a run with no enabled proxy stops at start.
+  direct: false          # Run with no proxy and ignore the list
+
+email:
+  # imap_host, imap_user, imap_pass and imap_domain are required. Put real values in config.local.yaml.
+  # A failed login at start stops the run.
+  imap_host: ""
+  imap_port: 993
+  imap_user: ""
+  imap_pass: ""
+  imap_domain: ""
+
+account:
+  password_length: 16
+  enable_totp: true          # enable 2FA (TOTP) setup after account creation
+
+concurrency:
+  max_workers: 10
+  max_browsers: 0      # maximum live Chrome processes (0 = max_workers)
+  account_count: 10    # total accounts to create (-1 = unlimited)
+  account_timeout: 1m  # bound per attempt up to the password POST. The work after it adds up to 60 s

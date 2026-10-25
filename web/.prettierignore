@@ -1,0 +1,9 @@
+package-lock.json
+src/lib/api.gen.d.ts
+.svelte-kit/
+.stryker-tmp/
+coverage/
+dist/
+playwright-report/
+reports/
+test-results/

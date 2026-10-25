@@ -1,0 +1,69 @@
+{
+  "name": "web",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "26.x"
+  },
+  "scripts": {
+    "prepare": "svelte-kit sync",
+    "postinstall": "node patch-stryker-runner.ts",
+    "dev": "vite dev",
+    "build": "vite build",
+    "gen:api": "openapi-typescript ../internal/api/openapi.yaml -o src/lib/api.gen.d.ts",
+    "check": "svelte-check --fail-on-warnings",
+    "lint": "eslint --max-warnings 0 .",
+    "format:check": "prettier --check .",
+    "knip": "knip",
+    "test:unit": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "mutate": "stryker run"
+  },
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@eslint/js": "10.0.1",
+    "@lucide/svelte": "1.58.0",
+    "@playwright/test": "1.64.1",
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
+    "@sveltejs/adapter-static": "4.0.0",
+    "@sveltejs/kit": "3.1.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@tailwindcss/vite": "4.3.3",
+    "@tanstack/svelte-virtual": "3.13.47",
+    "@types/d3-scale": "4.0.9",
+    "@types/d3-time": "3.0.4",
+    "@types/node": "26.6.5",
+    "@vitest/browser-playwright": "5.0.5",
+    "@vitest/coverage-v8": "5.0.5",
+    "d3-scale": "4.0.2",
+    "d3-time": "3.1.0",
+    "eslint": "10.13.0",
+    "eslint-plugin-sonarjs": "4.2.2",
+    "eslint-plugin-svelte": "3.23.1",
+    "globals": "17.13.0",
+    "knip": "6.42.1",
+    "openapi-fetch": "0.17.0",
+    "openapi-typescript": "7.13.0",
+    "playwright": "1.64.1",
+    "prettier": "3.9.10",
+    "prettier-plugin-svelte": "4.1.1",
+    "prettier-plugin-tailwindcss": "0.8.1",
+    "svelte": "5.57.2",
+    "svelte-check": "4.7.7",
+    "tailwindcss": "4.3.3",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.0",
+    "vite": "8.3.5",
+    "vitest": "5.0.5",
+    "vitest-browser-svelte": "3.1.0"
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
+  }
+}

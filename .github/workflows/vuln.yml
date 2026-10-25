@@ -1,0 +1,34 @@
+name: vuln
+
+# No push trigger on main, because the daily run covers main.
+on:
+  pull_request:
+  schedule:
+    # A new advisory turns the check red with no code change. The daily run finds it
+    # before a pull request does.
+    - cron: "17 6 * * *"
+  # A manual run proves the gate on main with no wait for the daily run.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # The id and the name match, so neither one moves the required-check context alone.
+  vuln:
+    name: vuln
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+      - shell: bash
+        run: bash scripts/ci-job.sh vuln

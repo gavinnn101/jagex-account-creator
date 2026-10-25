@@ -1,0 +1,1442 @@
+openapi: 3.1.0
+info:
+  title: Jagex account creator
+  version: 0.1.0
+  description: >-
+    The local API of serve mode. The server accepts a request only when its Host
+    names localhost or an IP address, and refuses a cross-site or same-site
+    request. A request body is limited to 64 KiB.
+paths:
+  /api/config:
+    get:
+      operationId: getConfig
+      summary: The effective config of serve mode
+      description: >-
+        The config of serve, as read at start or last saved, with the defaults.
+        The IMAP password never appears. imap_pass_set tells whether the config
+        holds one.
+      responses:
+        "200":
+          description: The effective config
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Config" }
+    put:
+      operationId: saveConfig
+      summary: Save the config of serve to the config file
+      description: >-
+        Checks the posted config as a run start checks its config. A valid
+        config becomes the config of serve, and the server writes it to the
+        config file. The file keeps its comments. An absent imap_pass means the
+        password of the config of serve, as read at start or last saved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Config" }
+      responses:
+        "200":
+          description: The saved config. The IMAP password never appears.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Config" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "422":
+          description: The config is not valid. The file does not change.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationResult" }
+        "500":
+          description: >-
+            The server could not read or write the config file. A file with an
+            unknown key or a wrong type also gets this answer. The file and the
+            config of serve do not change. The message names the failed step.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/config/validate:
+    post:
+      operationId: validateConfig
+      summary: Validate a config
+      description: >-
+        Checks the posted config as a run start checks its config. The server
+        fills no default, so the post holds every value. An absent imap_pass
+        means the password of the config of serve, as read at start or last
+        saved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Config" }
+      responses:
+        "200":
+          description: The result of the validation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationResult" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+  /api/checks/chrome:
+    get:
+      operationId: checkChrome
+      summary: Find Chrome and compare its major with the request shapes
+      responses:
+        "200":
+          description: The result of the check
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChromeCheck" }
+  /api/checks/mailbox:
+    post:
+      operationId: checkMailbox
+      summary: Log in to the mailbox of an email section
+      description: >-
+        Connects to the IMAP server of the posted email section, logs in and
+        logs out. An absent imap_pass means the password of the config of
+        serve, as read at start or last saved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailConfig" }
+      responses:
+        "200":
+          description: The result of the check
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MailboxCheck" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+  /api/run:
+    get:
+      operationId: getRun
+      summary: The state of the current or last run
+      responses:
+        "200":
+          description: The state of the run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunState" }
+    post:
+      operationId: startRun
+      summary: Start a run with a config
+      description: >-
+        Validates the posted config and starts a run with it. An absent
+        imap_pass means the password of the config of serve, as read at start
+        or last saved. Serve runs one run at a time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Config" }
+      responses:
+        "202":
+          description: The run started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunState" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: A run is in progress, or serve is stopping. The message names which.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "422":
+          description: The config is not valid
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationResult" }
+  /api/run/stop:
+    post:
+      operationId: stopRun
+      summary: The first stop stage
+      description: >-
+        No new attempt starts. An attempt that has not sent its password stops.
+        The work after the password POST finishes. With no run in progress, the
+        state does not change.
+      responses:
+        "200":
+          description: The state of the run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunState" }
+  /api/run/stop-now:
+    post:
+      operationId: stopRunNow
+      summary: The second stop stage
+      description: >-
+        Also stops the work after the password POST at once and kills Chrome.
+        Such an attempt writes its account as unconfirmed. With no run in
+        progress, the state does not change.
+      responses:
+        "200":
+          description: The state of the run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunState" }
+  /api/events:
+    get:
+      operationId: streamRunEvents
+      summary: The run state and each change of it, as server-sent events
+      description: >-
+        Each data line holds one RunState. The first one is the current state.
+        Each later one is the full state after a change. The stream ends when
+        serve stops or when the client falls too far behind. The client then
+        connects again.
+      responses:
+        "200":
+          description: The stream of run states
+          content:
+            text/event-stream:
+              schema: { $ref: "#/components/schemas/RunState" }
+  /api/logs:
+    get:
+      operationId: streamLogs
+      summary: The log lines of the current or last run of serve, as server-sent events
+      description: >-
+        Each data line holds one LogLine. The id of each event is
+        <run_id>:<end>, where end is the byte offset after the line in the log
+        file of the run. The stream first sends the lines that the file held at
+        the connect, then each new line. A new run sends its lines on the same
+        stream. Serve's own lines are not in the stream.
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          description: >-
+            The id of the last event that the client got. EventSource sends it
+            when it connects again. With an id of the run, the stream sends only
+            the lines after it. An id of another run, or an id that does not
+            parse, gets every line of the run.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The stream of log lines
+          content:
+            text/event-stream:
+              schema: { $ref: "#/components/schemas/LogLine" }
+  /api/runs:
+    get:
+      operationId: listRuns
+      summary: The past and current runs, newest first
+      description: >-
+        Each run holds its config and its counts. The counts come from the
+        attempts of the run.
+      parameters:
+        - $ref: "#/components/parameters/Before"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of runs
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunPage" }
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/runs/{id}:
+    get:
+      operationId: getRunByID
+      summary: One past or current run
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Run" }
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/runs/{id}/attempts:
+    get:
+      operationId: listRunAttempts
+      summary: The attempts of one run, newest first
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/Before"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of attempts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AttemptPage" }
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/runs/{id}/log:
+    get:
+      operationId: getRunLog
+      summary: The log file of one run
+      description: >-
+        The file holds each line of the run in the slog text form, at the level
+        of the run. A run that does not exist, or a run with no log file, gets
+        404.
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: The log file
+          headers:
+            Content-Disposition:
+              required: true
+              description: attachment, with the file name run-<id>.log
+              schema: { type: string }
+          content:
+            text/plain; charset=utf-8:
+              schema: { type: string }
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/accounts:
+    get:
+      operationId: listAccounts
+      summary: The saved accounts, newest first
+      description: >-
+        Each account holds no password, no TOTP secret and no backup codes.
+        Each filter is optional. The page holds only the accounts that match
+        every filter that the request sets.
+      parameters:
+        - $ref: "#/components/parameters/Before"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/RunFilter"
+        - $ref: "#/components/parameters/UnconfirmedFilter"
+        - $ref: "#/components/parameters/TOTPFilter"
+        - $ref: "#/components/parameters/ProxyFilter"
+        - $ref: "#/components/parameters/CreatedFromFilter"
+        - $ref: "#/components/parameters/CreatedToFilter"
+        - $ref: "#/components/parameters/SearchFilter"
+      responses:
+        "200":
+          description: A page of accounts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountPage" }
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/accounts/{id}:
+    get:
+      operationId: getAccountByID
+      summary: One saved account with its secrets
+      description: >-
+        The answer holds the password, the TOTP secret and the backup codes.
+        The list of accounts does not. An account with a TOTP secret also gets
+        the current TOTP code from the server clock.
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: The account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/accounts/{id}/confirm:
+    post:
+      operationId: confirmAccount
+      summary: Mark an account as checked by hand
+      description: >-
+        The confirm sets unconfirmed of the account to false. A second call
+        changes nothing. The operator calls it after a check of the account by
+        hand. Limitation: a failed hand check has no control. The account stays
+        unconfirmed, and an export with unconfirmed=false leaves it out.
+        Limitation: a confirm has no undo. Limitation: a confirm of an account
+        whose 2FA activation was unconfirmed leaves backup_codes absent.
+        Limitation: after a confirm, the unconfirmed count of the live run
+        state and the count of the same run in the run history differ.
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: The account, with no secrets
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountSummary" }
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          description: The server could not write or read the account. The message names the failed step.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/accounts/export:
+    get:
+      operationId: exportAccounts
+      summary: Export the saved accounts as a file
+      description: >-
+        The file holds every account that matches the filters, in id order,
+        with no paging. The filters are the filters of the list. The file holds
+        the secrets. The jsonl and csv formats hold the password, the TOTP
+        secret and the backup codes. The userpass format holds the password.
+      parameters:
+        - name: format
+          in: query
+          required: true
+          description: >-
+            jsonl for one JSON object for each line, csv for a CSV file, and
+            userpass for one email:password line for each account.
+          schema:
+            type: string
+            enum: [jsonl, csv, userpass]
+            x-enum-varnames: [ExportFormatJSONL, ExportFormatCSV, ExportFormatUserPass]
+        - $ref: "#/components/parameters/RunFilter"
+        - $ref: "#/components/parameters/UnconfirmedFilter"
+        - $ref: "#/components/parameters/TOTPFilter"
+        - $ref: "#/components/parameters/ProxyFilter"
+        - $ref: "#/components/parameters/CreatedFromFilter"
+        - $ref: "#/components/parameters/CreatedToFilter"
+        - $ref: "#/components/parameters/SearchFilter"
+      responses:
+        "200":
+          description: The export file. The media type follows the format.
+          headers:
+            Content-Disposition:
+              required: true
+              description: attachment, with the file name of the export
+              schema: { type: string }
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+                description: >-
+                  The jsonl format. One JSON object for each line. With no
+                  filter, the bytes are the bytes of the export mode of the CLI.
+            text/csv:
+              schema:
+                type: string
+                description: >-
+                  The csv format. The header row names the account fields in
+                  the order of the account record. Each row holds every column.
+                  One space joins the backup codes. A bool is true or false,
+                  and a number is its decimal value. A text, list or time cell
+                  is empty when the record omits the value. The file holds
+                  only the known fields.
+            text/plain:
+              schema:
+                type: string
+                description: The userpass format. One email:password line for each account.
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/proxies:
+    get:
+      operationId: listProxies
+      summary: Every proxy of the store with its health, in id order
+      description: >-
+        The list has no paging. The health of a proxy comes from the attempts
+        whose proxy is the proxy of the item. No item holds a user name or a
+        password. Limitation: an attempt that failed outside the proxy, for
+        example on the mailbox, counts against its proxy.
+      responses:
+        "200":
+          description: The proxies
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProxyList" }
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/proxies/import:
+    post:
+      operationId: importProxies
+      summary: Import the proxies of a proxy file
+      description: >-
+        The body is the text of a proxy file. Each line is
+        [scheme://]host:port[:user:pass], with the scheme http, socks5 or
+        socks5h. The server reads socks5h as socks5. The import skips an empty
+        line and a line that starts with #. A new proxy is enabled. A proxy
+        that the store holds with other credentials gets the new credentials,
+        and its enabled state does not change. A proxy that the store holds
+        with the same credentials changes nothing. In one body, the last line
+        of a proxy wins and counts one time as added, updated or repeated. Each
+        other line of that proxy counts as repeated. A bad line fails the
+        import, and no proxy changes.
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string }
+      responses:
+        "200":
+          description: The counts of the import
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProxyImport" }
+        "400":
+          description: >-
+            A line is not valid. The message names the line by its number only,
+            because the line can hold credentials.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "500":
+          description: The server could not read or write the proxies. The message names the failed step.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/proxies/export:
+    get:
+      operationId: exportProxies
+      summary: Export the proxies as a proxy file
+      description: >-
+        The file holds one line for each proxy, in id order, with its
+        credentials. An import of the file gives the same proxies. The file
+        does not hold the enabled state.
+      responses:
+        "200":
+          description: The proxy file
+          headers:
+            Content-Disposition:
+              required: true
+              description: attachment, with the file name proxies.txt
+              schema: { type: string }
+          content:
+            text/plain:
+              schema: { type: string }
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/proxies/{id}:
+    delete:
+      operationId: deleteProxy
+      summary: Delete a proxy
+      description: >-
+        The attempts of the proxy stay. A later import of the same proxy shows
+        their health again.
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: The proxy is deleted
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          description: The server could not delete the proxy. The message names the failed step.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/proxies/{id}/enable:
+    post:
+      operationId: enableProxy
+      summary: Enable a proxy
+      description: >-
+        A run uses only the enabled proxies. A run that is in progress keeps
+        the proxies that it started with. A second call changes nothing.
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: The proxy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Proxy" }
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          description: The server could not write or read the proxy. The message names the failed step.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/proxies/{id}/disable:
+    post:
+      operationId: disableProxy
+      summary: Disable a proxy
+      description: >-
+        A run does not use a disabled proxy. A run that is in progress keeps
+        the proxies that it started with. A second call changes nothing.
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: The proxy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Proxy" }
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          description: The server could not write or read the proxy. The message names the failed step.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/proxies/{id}/test:
+    post:
+      operationId: testProxy
+      summary: Check that the upstream of a proxy accepts a connection
+      description: >-
+        The server checks the proxy as an attempt checks it before Chrome
+        starts: it opens a TCP connection to the upstream, within 2 s. The test
+        changes no cooldown. Limitation: the test sends no request through the
+        proxy, so it does not check the credentials.
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: The result of the test
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProxyTest" }
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/presets:
+    get:
+      operationId: listPresets
+      summary: Every run preset of the store, in name order
+      description: >-
+        The list has no paging. The name order ignores the case of ASCII
+        letters. A preset holds no IMAP password. In the config of each
+        preset, database and email.imap_pass_set are the values of the config
+        of serve, as read at start or last saved.
+      responses:
+        "200":
+          description: The presets
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PresetList" }
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: savePreset
+      summary: Save a run preset under its name
+      description: >-
+        Checks the posted config as a run start checks its config. The server
+        removes the spaces at the start and the end of the name. A preset with
+        the same name gets the new config and keeps its id. An absent imap_pass
+        means the password of the config of serve, as read at start or last
+        saved. The preset holds no IMAP password.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PresetSave" }
+      responses:
+        "200":
+          description: The saved preset. The IMAP password never appears.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preset" }
+        "400":
+          description: The body is not a valid request, or the name is empty.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "422":
+          description: The config is not valid. No preset changes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationResult" }
+        "500":
+          description: The server could not write the preset. The message names the failed step.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/presets/{id}:
+    delete:
+      operationId: deletePreset
+      summary: Delete a run preset
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "204":
+          description: The preset is deleted
+        "400":
+          $ref: "#/components/responses/BadParameter"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          description: The server could not delete the preset. The message names the failed step.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+components:
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      description: The id of the item
+      schema: { type: integer, format: int64 }
+    Before:
+      name: before
+      in: query
+      description: >-
+        The page holds only the items with a lower id. Absent means the first
+        page. The next_before of a page is the before of the next page. The
+        server refuses a value below 1.
+      schema: { type: integer, format: int64, minimum: 1 }
+    Limit:
+      name: limit
+      in: query
+      description: The maximum number of items on the page. The server refuses a value out of range.
+      schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+    RunFilter:
+      name: run
+      in: query
+      description: >-
+        Only the accounts that an attempt of the run with this id saved. The
+        server refuses a value below 1.
+      schema: { type: integer, format: int64, minimum: 1 }
+    UnconfirmedFilter:
+      name: unconfirmed
+      in: query
+      description: true for only the unconfirmed accounts, false for only the confirmed accounts
+      schema: { type: boolean }
+    TOTPFilter:
+      name: totp
+      in: query
+      description: true for only the accounts with a TOTP secret, false for only the accounts without one
+      schema: { type: boolean }
+    ProxyFilter:
+      name: proxy
+      in: query
+      description: Only the accounts whose proxy is this value. The match is exact.
+      schema: { type: string }
+    CreatedFromFilter:
+      name: created_from
+      in: query
+      description: Only the accounts created at this time or later
+      schema: { type: string, format: date-time }
+    CreatedToFilter:
+      name: created_to
+      in: query
+      description: Only the accounts created before this time
+      schema: { type: string, format: date-time }
+    SearchFilter:
+      name: q
+      in: query
+      description: >-
+        Only the accounts whose email or username contains this text. The
+        search reads the email and username columns and ignores the case of
+        ASCII letters.
+      schema: { type: string }
+  responses:
+    BadRequest:
+      description: The body is not a valid request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooLarge:
+      description: The body is larger than 64 KiB
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadParameter:
+      description: A path or query parameter is not valid
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: The item does not exist
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    InternalError:
+      description: The server could not read the item. The message names the failed read.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+    Config:
+      description: The config file. Each key has the name of its YAML key.
+      type: object
+      required: [debug, database, chrome, proxy, email, account, concurrency]
+      properties:
+        debug: { type: boolean }
+        database: { type: string }
+        chrome: { $ref: "#/components/schemas/ChromeConfig" }
+        proxy: { $ref: "#/components/schemas/ProxyConfig" }
+        email: { $ref: "#/components/schemas/EmailConfig" }
+        account: { $ref: "#/components/schemas/AccountConfig" }
+        concurrency: { $ref: "#/components/schemas/ConcurrencyConfig" }
+    ChromeConfig:
+      type: object
+      required: [headless, timeout]
+      properties:
+        headless: { type: boolean }
+        timeout:
+          type: string
+          description: A Go duration, for example 1m30s
+    ProxyConfig:
+      type: object
+      required: [direct]
+      properties:
+        direct:
+          type: boolean
+          description: Run with no proxy and ignore the proxy list. With false, a run needs at least one enabled proxy.
+    EmailConfig:
+      type: object
+      required: [imap_host, imap_port, imap_user, imap_domain]
+      properties:
+        imap_host: { type: string }
+        imap_port: { type: integer }
+        imap_user: { type: string }
+        imap_pass:
+          type: string
+          writeOnly: true
+          description: Absent in a response. In a request, absent means the stored password.
+        imap_pass_set:
+          type: boolean
+          readOnly: true
+          description: True when the config of serve, as read at start or last saved, holds an IMAP password. A request ignores it.
+        imap_domain: { type: string }
+    AccountConfig:
+      type: object
+      required: [password_length, enable_totp]
+      properties:
+        password_length: { type: integer }
+        enable_totp: { type: boolean }
+    ConcurrencyConfig:
+      type: object
+      required: [max_workers, max_browsers, account_count, account_timeout]
+      properties:
+        max_workers: { type: integer }
+        max_browsers: { type: integer }
+        account_count: { type: integer }
+        account_timeout:
+          type: string
+          description: A Go duration, for example 1m30s
+    ValidationResult:
+      type: object
+      required: [valid, errors]
+      properties:
+        valid: { type: boolean }
+        errors:
+          type: array
+          description: One message for each invalid value
+          items: { type: string }
+    ChromeCheck:
+      type: object
+      required: [ok, shape_major]
+      properties:
+        ok:
+          type: boolean
+          description: True when the server found Chrome and read its version
+        error: { type: string }
+        version: { type: string }
+        shape_major:
+          type: integer
+          description: The Chrome major that the HTTP request shapes copy
+        mismatch:
+          type: boolean
+          description: True when the installed major differs from shape_major
+    MailboxCheck:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          description: True when the login succeeded
+        error: { type: string }
+    RunState:
+      description: The state of the current or last run of serve
+      type: object
+      required: [phase, workers, cooldowns, counts]
+      properties:
+        phase:
+          type: string
+          enum: [idle, running, stopping, stopping_now, ended]
+          x-enum-varnames: [RunPhaseIdle, RunPhaseRunning, RunPhaseStopping, RunPhaseStoppingNow, RunPhaseEnded]
+          description: >-
+            idle before the first run. running from the start of a run.
+            stopping after the first stop stage, and stopping_now after the
+            second. ended after the run returned.
+        run_id:
+          type: integer
+          format: int64
+          description: >-
+            The id of the run in the run history. Absent before the first run,
+            and in the start answer until the run row exists. Present from the
+            next event.
+        started_at:
+          type: string
+          format: date-time
+          description: The start of the run. Absent before the first run.
+        ended_at:
+          type: string
+          format: date-time
+          description: The end of the run. Absent until the run ends.
+        error:
+          type: string
+          description: The error that the run returned. Absent until the run ends with an error.
+        account_count:
+          type: integer
+          description: The accounts that the run creates. -1 means no limit.
+        workers:
+          type: array
+          description: One item for each worker of the run, in worker order
+          items: { $ref: "#/components/schemas/RunWorker" }
+        cooldowns:
+          type: array
+          description: The proxy cooldowns that still run
+          items: { $ref: "#/components/schemas/RunCooldown" }
+        counts: { $ref: "#/components/schemas/RunCounts" }
+    RunWorker:
+      description: >-
+        One worker of the run. A worker that waits for a proxy or in a backoff
+        has wait. A worker in an attempt has attempt. A worker with neither
+        does nothing.
+      type: object
+      required: [worker]
+      properties:
+        worker:
+          type: integer
+          description: The worker number, from 0
+        wait: { $ref: "#/components/schemas/RunWait" }
+        attempt: { $ref: "#/components/schemas/RunAttempt" }
+    RunWait:
+      description: >-
+        A wait of a worker before an attempt. The wait for a Chrome slot is
+        part of the attempt, as its open step browser_slot_wait.
+      type: object
+      required: [kind, since]
+      properties:
+        kind:
+          type: string
+          enum: [proxy, backoff]
+          x-enum-varnames: [RunWaitProxy, RunWaitBackoff]
+          description: >-
+            proxy while every proxy is in cooldown. backoff after a failed
+            attempt.
+        since:
+          type: string
+          format: date-time
+          description: The start of the wait
+        until:
+          type: string
+          format: date-time
+          description: The end of a backoff. Absent for a proxy wait.
+    RunAttempt:
+      description: An attempt that a worker runs
+      type: object
+      required: [started_at, step, step_phase, step_started_at]
+      properties:
+        started_at:
+          type: string
+          format: date-time
+          description: The start of the attempt
+        proxy:
+          type: string
+          description: The host and port of the proxy. Absent on a run with no proxy.
+        step:
+          type: string
+          description: The name of the open step
+        step_phase:
+          type: string
+          description: The phase of the open step, browser or http
+        step_started_at:
+          type: string
+          format: date-time
+          description: The start of the open step
+    RunCooldown:
+      description: A proxy cooldown that still runs
+      type: object
+      required: [proxy, reason, until, failures]
+      properties:
+        proxy:
+          type: string
+          description: The host and port of the proxy
+        reason:
+          type: string
+          description: The failure that started the cooldown
+        until:
+          type: string
+          format: date-time
+          description: The end of the cooldown
+        failures:
+          type: integer
+          description: The counted failures of the proxy. Each one doubles the cooldown, up to a cap.
+    RunCounts:
+      description: The totals of the run
+      type: object
+      required:
+        - attempts
+        - accounts
+        - unconfirmed
+        - failures
+        - browser_bytes_sent
+        - browser_bytes_received
+        - http_bytes_sent
+        - http_bytes_received
+      properties:
+        attempts:
+          type: integer
+          description: The attempts that ended
+        accounts:
+          type: integer
+          description: The accounts that the run saved, unconfirmed ones included
+        unconfirmed:
+          type: integer
+          description: >-
+            The saved accounts that are unconfirmed. Under a run of the run
+            history, the count holds the accounts that are still unconfirmed,
+            so a confirm lowers it. Under the live run state, the count holds
+            the accounts that were unconfirmed at their save, and a confirm
+            does not change it.
+        failures:
+          type: object
+          description: The failed attempts by category
+          additionalProperties: { type: integer }
+        browser_bytes_sent:
+          type: integer
+          format: int64
+          description: The bytes that the browser forward proxies sent to the upstream
+        browser_bytes_received:
+          type: integer
+          format: int64
+          description: The bytes that the browser forward proxies received from the upstream
+        http_bytes_sent:
+          type: integer
+          format: int64
+          description: The bytes that the HTTP forward proxies sent to the upstream
+        http_bytes_received:
+          type: integer
+          format: int64
+          description: The bytes that the HTTP forward proxies received from the upstream
+    LogLine:
+      description: >-
+        One line of the log file of a run, in its parts. Each value is the text
+        of the file, with no quotes.
+      type: object
+      required: [run_id, time, level, msg, attrs]
+      properties:
+        run_id:
+          type: integer
+          format: int64
+          description: The id of the run
+        time:
+          type: string
+          description: >-
+            The time as the file holds it, for example
+            2026-10-21T10:00:00.000+02:00. Empty when the line has no time.
+        level:
+          type: string
+          description: DEBUG, INFO, WARN or ERROR
+        msg: { type: string }
+        attrs:
+          type: array
+          description: >-
+            The attributes in the order of the line. An attribute of a group
+            has a dotted key, for example steps.browser_slot_wait.
+          items: { $ref: "#/components/schemas/LogAttr" }
+    LogAttr:
+      description: One attribute of a log line
+      type: object
+      required: [key, value]
+      properties:
+        key: { type: string }
+        value: { type: string }
+    Run:
+      description: One run in the run history
+      type: object
+      required: [id, source, started_at, config, counts]
+      properties:
+        id: { type: integer, format: int64 }
+        source:
+          type: string
+          enum: [cli, serve]
+          x-enum-varnames: [RunSourceCLI, RunSourceServe]
+          description: cli for a run of the full mode, serve for a run that serve started
+        started_at:
+          type: string
+          format: date-time
+          description: The start of the run
+        ended_at:
+          type: string
+          format: date-time
+          description: The end of the run. Absent while the run is in progress.
+        error:
+          type: string
+          description: The error that the run returned. Absent on a run that ended with no error.
+        config:
+          $ref: "#/components/schemas/Config"
+          description: The config of the run. The IMAP password never appears.
+        counts: { $ref: "#/components/schemas/RunCounts" }
+    RunPage:
+      description: A page of runs, newest first
+      type: object
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items: { $ref: "#/components/schemas/Run" }
+        next_before:
+          type: integer
+          format: int64
+          description: The before of the next page. Absent on the last page.
+    AttemptStep:
+      description: One timed step of an attempt
+      type: object
+      required: [name, duration_ms]
+      properties:
+        name:
+          type: string
+          description: The name of the step, for example browser_slot_wait
+        duration_ms:
+          type: integer
+          format: int64
+          description: The duration of the step in milliseconds
+    Attempt:
+      description: One attempt that ended
+      type: object
+      required:
+        - id
+        - run_id
+        - worker
+        - started_at
+        - duration_ms
+        - steps
+        - browser_bytes_sent
+        - browser_bytes_received
+        - http_bytes_sent
+        - http_bytes_received
+      properties:
+        id: { type: integer, format: int64 }
+        run_id:
+          type: integer
+          format: int64
+          description: The id of the run of the attempt
+        worker:
+          type: integer
+          description: The worker number, from 0
+        started_at:
+          type: string
+          format: date-time
+          description: The start of the attempt, at the start of the wait for a Chrome slot
+        duration_ms:
+          type: integer
+          format: int64
+          description: The duration of the attempt in milliseconds. The steps add up to it.
+        proxy:
+          type: string
+          description: The host and port of the proxy. Absent on a run with no proxy.
+        category:
+          type: string
+          description: The category of the failure. Absent on success.
+        error:
+          type: string
+          description: The error of the attempt. Absent on success.
+        failed_step:
+          type: string
+          description: The name of the step that failed. Absent when no step failed.
+        failed_phase:
+          type: string
+          description: The phase of the step that failed, browser or http. Absent when no step failed.
+        steps:
+          type: array
+          description: The steps of the attempt, in order
+          items: { $ref: "#/components/schemas/AttemptStep" }
+        browser_bytes_sent:
+          type: integer
+          format: int64
+          description: The bytes that the browser forward proxy sent to the upstream. 0 on a run with no proxy.
+        browser_bytes_received:
+          type: integer
+          format: int64
+          description: The bytes that the browser forward proxy received from the upstream. 0 on a run with no proxy.
+        http_bytes_sent:
+          type: integer
+          format: int64
+          description: The bytes that the HTTP forward proxy sent to the upstream. 0 on a run with no proxy.
+        http_bytes_received:
+          type: integer
+          format: int64
+          description: The bytes that the HTTP forward proxy received from the upstream. 0 on a run with no proxy.
+        account_id:
+          type: integer
+          format: int64
+          description: The id of the saved account. Absent when the attempt saved no account.
+        email:
+          type: string
+          description: The email of the saved account. Absent when the attempt saved no account.
+        username:
+          type: string
+          description: The username of the saved account. Absent when the attempt saved no account.
+    AttemptPage:
+      description: A page of attempts, newest first
+      type: object
+      required: [attempts]
+      properties:
+        attempts:
+          type: array
+          items: { $ref: "#/components/schemas/Attempt" }
+        next_before:
+          type: integer
+          format: int64
+          description: The before of the next page. Absent on the last page.
+    AccountSummary:
+      description: One saved account with no secrets
+      type: object
+      required: [id, email, username, created_at, totp]
+      properties:
+        id: { type: integer, format: int64 }
+        run_id:
+          type: integer
+          format: int64
+          description: The id of the run that saved the account. Absent when no attempt links the account.
+        email: { type: string }
+        username: { type: string }
+        created_at: { type: string, format: date-time }
+        proxy:
+          type: string
+          description: The host and port of the proxy. Absent on a run with no proxy.
+        browser_bytes_sent:
+          type: integer
+          format: int64
+          description: The bytes that the browser forward proxy sent to the upstream. Absent when 0.
+        browser_bytes_received:
+          type: integer
+          format: int64
+          description: The bytes that the browser forward proxy received from the upstream. Absent when 0.
+        http_bytes_sent:
+          type: integer
+          format: int64
+          description: The bytes that the HTTP forward proxy sent to the upstream. Absent when 0.
+        http_bytes_received:
+          type: integer
+          format: int64
+          description: The bytes that the HTTP forward proxy received from the upstream. Absent when 0.
+        unconfirmed:
+          type: boolean
+          description: >-
+            True when the process did not see Jagex confirm the last change to
+            the account, and no confirm marked the account as checked by hand.
+            Absent when false.
+        totp:
+          type: boolean
+          description: True when the account has a TOTP secret
+    Account:
+      description: One saved account with its secrets
+      allOf:
+        - $ref: "#/components/schemas/AccountSummary"
+        - type: object
+          required: [password]
+          properties:
+            password: { type: string }
+            totp_secret:
+              type: string
+              description: The TOTP secret. Absent when the account has no 2FA.
+            backup_codes:
+              type: array
+              description: >-
+                The backup codes of the 2FA. Absent with no TOTP secret, or
+                when the process did not see Jagex confirm the 2FA activation.
+                A confirm does not add them.
+              items: { type: string }
+            totp_code:
+              type: string
+              pattern: "^[0-9]{6}$"
+              description: >-
+                The TOTP code of the current 30 s window, from the server clock.
+                Absent when the account has no TOTP secret, or when the secret
+                does not decode.
+            totp_remaining_seconds:
+              type: integer
+              minimum: 1
+              maximum: 30
+              description: >-
+                The seconds left in the window of totp_code, rounded up.
+                Absent when totp_code is absent.
+    AccountPage:
+      description: A page of accounts, newest first
+      type: object
+      required: [accounts, total]
+      properties:
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/AccountSummary" }
+        total:
+          type: integer
+          format: int64
+          description: >-
+            The count of the accounts that the filters select. It does not
+            change with before and limit, so each page of one filter has the
+            same total.
+        next_before:
+          type: integer
+          format: int64
+          description: The before of the next page. Absent on the last page.
+    Proxy:
+      description: One proxy of the store with its health. It holds no user name and no password.
+      type: object
+      required:
+        - id
+        - proxy
+        - auth
+        - enabled
+        - added_at
+        - attempts
+        - successes
+        - browser_bytes_sent
+        - browser_bytes_received
+        - http_bytes_sent
+        - http_bytes_received
+      properties:
+        id: { type: integer, format: int64 }
+        proxy:
+          type: string
+          description: >-
+            The host and port of the proxy, with the prefix socks5:// for a
+            SOCKS5 proxy. The attempts and the accounts name the proxy in the
+            same form.
+        auth:
+          type: boolean
+          description: True when the proxy has a user name
+        enabled:
+          type: boolean
+          description: True when a run uses the proxy
+        added_at:
+          type: string
+          format: date-time
+          description: The time of the import that added the proxy
+        attempts:
+          type: integer
+          description: The attempts that ended on the proxy
+        successes:
+          type: integer
+          description: The attempts on the proxy with no failure
+        browser_bytes_sent:
+          type: integer
+          format: int64
+          description: The bytes that the browser forward proxies of its attempts sent to the upstream
+        browser_bytes_received:
+          type: integer
+          format: int64
+          description: The bytes that the browser forward proxies of its attempts received from the upstream
+        http_bytes_sent:
+          type: integer
+          format: int64
+          description: The bytes that the HTTP forward proxies of its attempts sent to the upstream
+        http_bytes_received:
+          type: integer
+          format: int64
+          description: The bytes that the HTTP forward proxies of its attempts received from the upstream
+        last_attempt_at:
+          type: string
+          format: date-time
+          description: The start of the newest attempt on the proxy. Absent with no attempt.
+        last_failure:
+          type: string
+          description: The category of the newest failed attempt on the proxy. Absent with no failed attempt.
+    ProxyList:
+      description: Every proxy of the store, in id order
+      type: object
+      required: [proxies]
+      properties:
+        proxies:
+          type: array
+          items: { $ref: "#/components/schemas/Proxy" }
+    ProxyImport:
+      description: The counts of one import
+      type: object
+      required: [added, updated, repeated]
+      properties:
+        added:
+          type: integer
+          description: The new proxies
+        updated:
+          type: integer
+          description: The proxies whose credentials changed
+        repeated:
+          type: integer
+          description: >-
+            The lines that changed nothing: a proxy that the store holds with
+            the same credentials, or an earlier line of a proxy in the same
+            body
+    ProxyTest:
+      description: The result of a proxy test
+      type: object
+      required: [ok, duration_ms]
+      properties:
+        ok:
+          type: boolean
+          description: True when the upstream accepted the connection
+        error:
+          type: string
+          description: The error of the test. It names the address of the upstream and no credentials. Absent when ok.
+        duration_ms:
+          type: integer
+          format: int64
+          description: The duration of the test in milliseconds
+    Preset:
+      description: One named run config of the store. It holds no IMAP password.
+      type: object
+      required: [id, name, saved_at, config]
+      properties:
+        id: { type: integer, format: int64 }
+        name:
+          type: string
+          description: The name of the preset. Two names that differ only in case name two presets.
+        saved_at:
+          type: string
+          format: date-time
+          description: The time of the last save of the preset
+        config:
+          $ref: "#/components/schemas/Config"
+          description: >-
+            The config of the preset. database and email.imap_pass_set are the
+            values of the config of serve, not the saved values.
+    PresetList:
+      description: Every preset of the store, in name order
+      type: object
+      required: [presets]
+      properties:
+        presets:
+          type: array
+          items: { $ref: "#/components/schemas/Preset" }
+    PresetSave:
+      description: The body of a preset save
+      type: object
+      required: [name, config]
+      properties:
+        name:
+          type: string
+          description: The name of the preset. The server removes the spaces at the start and the end, and refuses an empty name.
+        config: { $ref: "#/components/schemas/Config" }

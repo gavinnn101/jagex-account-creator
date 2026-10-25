@@ -1,0 +1,87 @@
+@import 'tailwindcss';
+
+/*
+ * The one home of the colors and spacings of the dashboard. Dark is the default.
+ * Each text color meets WCAG AA on canvas, surface and panel, and each border and ring meets 3:1.
+ */
+@theme {
+  --color-canvas: #0d1320;
+  --color-surface: #141c2b;
+  --color-panel: #1c2638;
+  --color-ink: #e7ecf3;
+  --color-muted: #9eabbf;
+  --color-line: #2a3649;
+  --color-line-strong: #6b7a93;
+  --color-accent: #6cb6ff;
+  --color-accent-strong: #9acbff;
+  --color-on-accent: #08182c;
+  --color-accent-soft: #13304f;
+  --color-danger: #ff7b72;
+  --color-danger-strong: #ffa198;
+  --color-on-danger: #2a0705;
+  --color-danger-soft: #3d1514;
+  --color-success: #56d364;
+  --color-success-soft: #132e1c;
+  --color-warning: #e3b341;
+  --color-warning-soft: #35290a;
+  --color-focus: #ffd479;
+  --color-chart-accounts: #6cb6ff;
+  --color-chart-failures: #ffa657;
+  --spacing-gap: 0.75rem;
+  --spacing-section: 1.5rem;
+}
+
+/* @theme takes only custom properties, so color-scheme lives here. It themes the native controls. */
+:root {
+  color-scheme: dark;
+}
+
+/* Unlayered, so it beats the theme layer. Each utility reads the variable, so this block re-themes them all. */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --color-canvas: #f3f5f8;
+  --color-surface: #ffffff;
+  --color-panel: #e8ecf2;
+  --color-ink: #121a26;
+  --color-muted: #4b5567;
+  --color-line: #d3dae4;
+  --color-line-strong: #7a8699;
+  --color-accent: #1a5fd0;
+  --color-accent-strong: #134aa6;
+  --color-on-accent: #ffffff;
+  --color-accent-soft: #dde9fc;
+  --color-danger: #b3261e;
+  --color-danger-strong: #8c1d18;
+  --color-on-danger: #ffffff;
+  --color-danger-soft: #fbe1df;
+  --color-success: #116329;
+  --color-success-soft: #dcf3e2;
+  --color-warning: #8a5c00;
+  --color-warning-soft: #f9ecc8;
+  --color-focus: #1a5fd0;
+  --color-chart-accounts: #1a5fd0;
+  --color-chart-failures: #c2410c;
+}
+
+/*
+ * The one layout of a list of terms and values. Both columns can shrink and a long value breaks,
+ * so the list fits a phone with any font.
+ */
+@utility term-grid {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  overflow-wrap: break-word;
+}
+
+@layer base {
+  /* The page edges and the overscroll area show the canvas too. */
+  html {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+}

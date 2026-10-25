@@ -1,0 +1,258 @@
+version: "2"
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - goimports
+  settings:
+    gci:
+      # The import groups keep the order standard, third-party, local module.
+      sections:
+        - standard
+        - default
+        - localmodule
+
+linters:
+  # Every linter is on. A linter that a version bump adds is on from the bump.
+  default: all
+  disable:
+    # Deprecated. A versioned successor replaces each one.
+    - exhaustruct
+    - gomodguard
+    - wsl
+    # cyclop measures the same metric and also counts a default clause, so it is never lower.
+    - gocyclo
+    # Layout only. A formatter owns layout.
+    - lll
+    - nlreturn
+    - wsl_v5
+    # Declaration order is a style choice. No defect class.
+    - decorder
+    - funcorder
+    # A zero-value field is idiomatic Go.
+    - exhaustruct_v5
+    # One sentinel for each message is a speculative abstraction. errorlint holds the comparison half.
+    - err113
+    # The repeated strings are header names and URL schemes. A constant adds indirection only.
+    - goconst
+    # The reported numbers are file modes, timeouts and RFC constants that the line already names.
+    - mnd
+    # The project idiom is `if err := f(); err != nil`.
+    - noinlineerr
+    # A named result documents a multi-value return. nakedret holds the hazard.
+    - nonamedreturns
+    # The tests share listeners and timers. tparallel checks the tests that do run in parallel.
+    - paralleltest
+    # The tests exercise unexported functions.
+    - testpackage
+    # The tags mirror two external formats: the Jagex wire format and the JSONL export format.
+    - tagliatelle
+    # Short names (i, p, ok, wg) are idiomatic Go.
+    - varnamelen
+
+  settings:
+    cyclop:
+      # Each `if err != nil` adds one, so the default of 10 fails a flat list of checked calls. gocognit holds the nesting.
+      max-complexity: 15
+    depguard:
+      rules:
+        dependencies:
+          list-mode: strict
+          files:
+            - $all
+          allow:
+            - $gostd
+            - jagex_account_creator
+            - github.com/emersion/go-imap
+            - github.com/lmittmann/tint
+            - github.com/mafredri/cdp
+            # The generated API server binds its path and query parameters with it.
+            - github.com/oapi-codegen/runtime
+            - github.com/sardanioss/httpcloak
+            # The wire test uses its HTTP/2 frame reader. The forward proxy uses its SOCKS5 client.
+            - golang.org/x/net
+            - golang.org/x/sync
+            - golang.org/x/sys
+            - golang.org/x/term
+            - gopkg.in/yaml.v3
+            - modernc.org/sqlite
+          deny:
+            - pkg: log$
+              desc: use log/slog
+            - pkg: math/rand$
+              desc: use math/rand/v2
+        external-http:
+          files:
+            - "!**/internal/proxy/forward.go"
+            - "!**/internal/proxy/forward_test.go"
+            - "!**/internal/proxy/proxytest/socks5.go"
+            # The local API server of serve mode. A deny entry matches by prefix, so net/http also denies
+            # net/http/httptest. Keep the glob wide enough for serve_test.go and serve_api_test.go.
+            - "!**/cmd/creator/serve*.go"
+          deny:
+            - pkg: net/http
+              desc: external requests use httpcloak. Only the forward proxy, its test fake and the local API server of serve mode use net/http.
+        crypto-rand:
+          files:
+            - "**/internal/account/*.go"
+          deny:
+            - pkg: math/rand
+              desc: account data comes from crypto/rand
+        jagexapi-knows-no-cdp:
+          files:
+            - "**/internal/jagexapi/*.go"
+          deny:
+            - pkg: github.com/mafredri/cdp
+              desc: the jagexapi package knows nothing about CDP
+            - pkg: jagex_account_creator/internal/browser
+              desc: the jagexapi package knows nothing about CDP
+        # Limitation: depguard sees imports only, so review holds the browser package's string literals.
+        browser-knows-no-jagex:
+          files:
+            - "**/internal/browser/*.go"
+          deny:
+            - pkg: jagex_account_creator/internal/jagexapi
+              desc: the browser package knows nothing about Jagex
+    dupl:
+      # The default of 150 tokens passes near-copy table tests.
+      threshold: 100
+    exhaustive:
+      # A default branch handles the unknown value.
+      default-signifies-exhaustive: true
+    forbidigo:
+      forbid:
+        - pattern: ^(fmt\.Print(|f|ln)|print|println)$
+          msg: use log/slog
+        - pattern: ^panic$
+          msg: return an error
+        # golangci-lint lints one package at a time, so a cross-package copy needs its own named rule.
+        # Limitation: the pattern matches the token, so a copy that spells the key as the string "time" passes.
+        - pattern: ^slog\.TimeKey$
+          msg: use jagex_account_creator/internal/logtest
+    funlen:
+      lines: 60
+      statements: 40
+    gocognit:
+      # The top of the range that the linter recommends. Its default is 30.
+      min-complexity: 20
+    gocritic:
+      enable-all: true
+      disabled-checks:
+        # Performance hints on cold paths.
+        - hugeParam
+        - rangeValCopy
+        # Style choices that other enabled checks contradict or that carry no defect.
+        - importShadow
+        - octalLiteral
+        - paramTypeCombine
+        - unnamedResult
+    gosec:
+      excludes:
+        # The operator supplies every path: the config file, the proxy file, CHROME_PATH.
+        - G304
+        - G703
+        # Launching Chrome from a discovered path is the purpose of the launcher.
+        - G204
+        # math/rand gives the human-like delays and the jitter. depguard keeps it out of the account package.
+        - G404
+        # G117 reports the tag of a credential field such as `Password`. The config and the output record hold one by design.
+        - G117
+      config:
+        # The directories hold the browser cache, the UA cache file and the debug captures. 0755 is the ordinary directory mode.
+        G301: "0755"
+    govet:
+      enable-all: true
+      disable:
+        # Struct layout is a micro-optimization here.
+        - fieldalignment
+        # Every report is an `err` that an inner scope declares again.
+        - shadow
+    ireturn:
+      allow:
+        - anon
+        - error
+        - empty
+        - stdlib
+        # A strict-server method returns the response interface that internal/api generates for its operation.
+        - ^jagex_account_creator/internal/api\.[A-Za-z]+ResponseObject$
+    maintidx:
+      under: 20
+    nestif:
+      min-complexity: 5
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    revive:
+      enable-default-rules: true
+      rules:
+        - name: deep-exit
+        # 6 is the largest non-test per-call signature in the tree. A count above it carries a run dependency.
+        - name: argument-limit
+          arguments: [6]
+    sloglint:
+      # Limitation: sloglint checks the case of a literal key. It reads no variable key (cmd/creator/steps.go), no slog.GroupAttrs, and it cannot tell that two keys name one thing. The class fails toward a missed key.
+      key-naming-case: snake
+    staticcheck:
+      checks:
+        - all
+    unused:
+      # A field that is only written is dead. The default counts the write as a use.
+      field-writes-are-uses: false
+    usestdlibvars:
+      # The net/http constants need the import that depguard denies.
+      http-method: false
+      http-status-code: false
+    wrapcheck:
+      # A bare ctx.Err() return is the idiom, and a wrap would change the fatal log text.
+      # A conn wrapper passes the inner Read and Write errors through unchanged.
+      # io.Copy compares the io.EOF from Read with ==.
+      # errgroup passes the errors of the module's own workers through.
+      extra-ignore-sigs:
+        - (context.Context).Err()
+        - (net.Conn).Read(
+        - (net.Conn).Write(
+        - (*golang.org/x/sync/errgroup.Group).Wait()
+      # The function where a third-party error enters the module wraps it. A caller in the module may wrap only to add a name the callee lacks.
+      # Limitation: no lint stops a caller from repeating its callee's text. A bare sentinel or ctx.Err() from a module function reaches the log with no operation name.
+      ignore-package-globs:
+        - jagex_account_creator/*
+
+  exclusions:
+    rules:
+      # dupl stays on for the test files. Limitation: a copy under its threshold passes.
+      - path: _test\.go
+        linters:
+          # A fixture holds fake credentials and writes temporary files.
+          - gosec
+          # The test timeout bounds the I/O of a test.
+          - noctx
+      # A table test with its subtests is one long function by design. The limits hold on the analyzer in internal/waitcheck.
+      # A new test dir gets the complexity limits until it is added here.
+      - path: ^(cmd/creator|internal/(account|browser|browser/cdptest|config|cookies|email|jagexapi|logtest|proxy|proxy/proxytest|store|waittest))/[^/]*_test\.go$
+        linters:
+          - cyclop
+          - funlen
+          - gocognit
+      # assertRequest in internal/jagexapi/shapes_test.go takes the fields of one request shape. Limitation: a test helper above 6 passes unflagged.
+      - path: _test\.go
+        text: argument-limit
+        linters:
+          - revive
+      # The package doc of internal/api is in the generated file, which the linters skip.
+      - path: ^internal/api/generate\.go$
+        text: package-comments
+        linters:
+          - revive
+      # The text keeps the other forbidigo patterns alive in the one home of the time-key handler.
+      - path: internal/logtest/
+        text: slog\.TimeKey
+        linters:
+          - forbidigo
+
+issues:
+  # A red run lists every issue. The defaults show 3 issues of one text, 50 of one linter and 1 of one line.
+  max-same-issues: 0
+  max-issues-per-linter: 0
+  uniq-by-line: false

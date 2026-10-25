@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      // Runs before the first paint, so a light choice shows no dark flash. Blocked storage gives dark.
+      try {
+        if (localStorage.getItem('creator-theme') === 'light') {
+          document.documentElement.dataset.theme = 'light';
+        }
+      } catch {}
+    </script>
+    %sveltekit.head%
+  </head>
+  <body>
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>
