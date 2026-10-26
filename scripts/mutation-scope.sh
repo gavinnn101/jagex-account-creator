@@ -10,7 +10,7 @@
 mutation_scope() {
   local base="$1" out="$2" path dir trigger
   # A change to one of these files can change the verdict on any file, so it runs both halves in full.
-  local triggers=(scripts/mutation-gate.sh scripts/mutation-scope.sh web/stryker.config.json web/patch-stryker-runner.ts web/vite.config.ts web/package.json go.mod)
+  local triggers=(scripts/mutation-gate.sh scripts/mutation-scope.sh web/stryker.config.json web/patch-stryker-runner.ts web/vite.config.ts web/package.json web/package-lock.json go.mod)
   local go_mode=scoped web_mode=scoped
   local -a tree=() changed=() go_files=() go_outside=() web_files=()
   local -A touched=() go_test_dirs=() web_test_dirs=()

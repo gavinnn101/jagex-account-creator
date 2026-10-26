@@ -1180,8 +1180,8 @@ if err != nil {
 - With a base, each half mutates only its scope. `mutation_scope` in `scripts/mutation-scope.sh` is the one home of the scope:
   - The changed files are the files of `git diff --merge-base <base>`, deleted files included, and the untracked files.
   - The Go scope is each changed non-test `.go` file, and each non-test `.go` file in the dir of a changed `_test.go` file. The web scope is each changed `.ts` or `.svelte` file under `web/src`, and each such file in the dir of a changed `*.test.ts` file. A deleted test counts. `web/e2e` and a `.go` file under a `testdata` dir add nothing.
-  - A change to a test-helper dir runs the full half of its language. A Go helper dir is a `*test` package, and a web helper dir is a `web/src/lib/*test/` dir.
-  - A change to one of the trigger files runs both halves in full. The list is in `mutation_scope`. It holds the two gate scripts, `web/stryker.config.json`, `web/patch-stryker-runner.ts`, `web/vite.config.ts`, `web/package.json` and `go.mod`.
+  - A change to a test-helper dir runs the full half of its language. A Go helper dir is a `*test` package, such as `cdptest`, `logtest`, `proxytest` and `waittest`. A web helper dir is a `web/src/lib/*test/` dir.
+  - A change to one of the trigger files runs both halves in full. The list is in `mutation_scope`. It holds the two gate scripts, `web/stryker.config.json`, `web/patch-stryker-runner.ts`, `web/vite.config.ts`, `web/package.json`, `web/package-lock.json` and `go.mod`. `npm ci` installs from the lockfile, so a lockfile change moves the dependencies of Stryker and Vitest.
   - A half with an empty scope skips its tool. A skipped Stryker half also skips `npm ci` and the Playwright install.
   - The last line gives the mode and the file count of each half, and the killed count of each tool that ran.
 - Limitation: a change that weakens a test outside the dirs of its changed files passes. Only a full run catches it.
