@@ -22,7 +22,7 @@ const ended: Run = {
     database: 'creator.db',
     debug: false,
     email: {
-      imap_domain: 'example.com',
+      imap_domains: ['example.com'],
       imap_host: 'imap.example.com',
       imap_pass_set: true,
       imap_port: 993,
@@ -215,7 +215,7 @@ describe('page', () => {
       ['concurrency.max_workers', '2'],
       ['database', 'creator.db'],
       ['debug', 'false'],
-      ['email.imap_domain', 'example.com'],
+      ['email.imap_domains', 'example.com'],
       ['email.imap_host', 'imap.example.com'],
       ['email.imap_pass_set', 'true'],
       ['email.imap_port', '993'],

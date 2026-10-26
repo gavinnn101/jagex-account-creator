@@ -182,7 +182,7 @@ func apiConfig(cfg *config.Config) api.Config {
 			ImapPort:    cfg.Email.IMAPPort,
 			ImapUser:    cfg.Email.IMAPUser,
 			ImapPassSet: new(cfg.Email.IMAPPass != ""),
-			ImapDomain:  cfg.Email.IMAPDomain,
+			ImapDomains: cfg.Email.IMAPDomains,
 		},
 		Account: api.AccountConfig{PasswordLength: cfg.Account.PasswordLength, EnableTotp: *cfg.Account.EnableTOTP},
 		Concurrency: api.ConcurrencyConfig{
@@ -196,7 +196,7 @@ func apiConfig(cfg *config.Config) api.Config {
 
 // configJSON returns the stored form of cfg: the JSON of apiConfig, so it holds no IMAP password.
 func configJSON(cfg *config.Config) json.RawMessage {
-	text, _ := json.Marshal(apiConfig(cfg)) //nolint:errchkjson // Unreachable: api.Config holds only bools, ints, strings and pointers to them.
+	text, _ := json.Marshal(apiConfig(cfg)) //nolint:errchkjson // Unreachable: api.Config holds only bools, ints, strings, a string list and pointers to them.
 	return text
 }
 
@@ -232,7 +232,7 @@ func emailFromAPI(e api.EmailConfig, storedPass string) config.EmailConfig {
 	if e.ImapPass != nil {
 		pass = *e.ImapPass
 	}
-	return config.EmailConfig{IMAPHost: e.ImapHost, IMAPPort: e.ImapPort, IMAPUser: e.ImapUser, IMAPPass: pass, IMAPDomain: e.ImapDomain}
+	return config.EmailConfig{IMAPHost: e.ImapHost, IMAPPort: e.ImapPort, IMAPUser: e.ImapUser, IMAPPass: pass, IMAPDomains: e.ImapDomains}
 }
 
 // errorMessages returns one message for each error that err joins.

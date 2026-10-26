@@ -28,7 +28,7 @@ const fast: Preset = {
       imap_port: 143,
       imap_user: 'fast@example.com',
       imap_pass_set: false,
-      imap_domain: 'fast.example',
+      imap_domains: ['fast.example'],
     },
     account: { password_length: 20, enable_totp: false },
     concurrency: { max_workers: 8, max_browsers: 4, account_count: -1, account_timeout: '2m' },

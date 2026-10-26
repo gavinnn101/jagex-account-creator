@@ -11,13 +11,14 @@ proxy:
   direct: false          # Run with no proxy and ignore the list
 
 email:
-  # imap_host, imap_user, imap_pass and imap_domain are required. Put real values in config.local.yaml.
+  # imap_host, imap_user, imap_pass and imap_domains are required. Put real values in config.local.yaml.
   # A failed login at start stops the run.
   imap_host: ""
   imap_port: 993
   imap_user: ""
   imap_pass: ""
-  imap_domain: ""
+  # The domains of the new addresses, for example [example.com, example.org]. Each attempt takes one at random.
+  imap_domains: []
 
 account:
   password_length: 16

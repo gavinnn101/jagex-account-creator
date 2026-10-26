@@ -15,7 +15,7 @@ const config: Run['config'] = {
   database: 'creator.db',
   chrome: { headless: true, timeout: '30s' },
   proxy: { direct: false },
-  email: { imap_host: 'h', imap_port: 993, imap_user: 'u', imap_domain: 'd' },
+  email: { imap_host: 'h', imap_port: 993, imap_user: 'u', imap_domains: ['d'] },
   account: { password_length: 16, enable_totp: true },
   concurrency: { max_workers: 2, max_browsers: 0, account_count: 10, account_timeout: '1m0s' },
 };

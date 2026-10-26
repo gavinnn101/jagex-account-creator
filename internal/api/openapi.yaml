@@ -813,7 +813,7 @@ components:
           description: Run with no proxy and ignore the proxy list. With false, a run needs at least one enabled proxy.
     EmailConfig:
       type: object
-      required: [imap_host, imap_port, imap_user, imap_domain]
+      required: [imap_host, imap_port, imap_user, imap_domains]
       properties:
         imap_host: { type: string }
         imap_port: { type: integer }
@@ -826,7 +826,10 @@ components:
           type: boolean
           readOnly: true
           description: True when the config of serve, as read at start or last saved, holds an IMAP password. A request ignores it.
-        imap_domain: { type: string }
+        imap_domains:
+          type: array
+          items: { type: string }
+          description: The domains of the new addresses. Each attempt takes one at random.
     AccountConfig:
       type: object
       required: [password_length, enable_totp]

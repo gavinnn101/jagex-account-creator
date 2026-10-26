@@ -10,7 +10,7 @@ const email: EmailConfig = {
   imap_port: 993,
   imap_user: 'user@example.com',
   imap_pass: 'secret',
-  imap_domain: 'example.com',
+  imap_domains: ['example.com'],
 };
 
 interface Sent {

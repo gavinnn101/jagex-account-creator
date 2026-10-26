@@ -32,6 +32,34 @@ func TestGenerateName(t *testing.T) {
 	}
 }
 
+func TestGenerateEmail(t *testing.T) {
+	for _, domains := range [][]string{
+		{"example.com"},
+		{"example.com", "example.org"},
+		{"a.example.com", "b.example.com", "c.example.com"},
+	} {
+		t.Run(strings.Join(domains, ","), func(t *testing.T) {
+			seen := make(map[string]int)
+			// 300 calls make a missed domain of three less likely than 1 in 10^52.
+			for range 300 {
+				local, domain, ok := strings.Cut(GenerateEmail(domains), "@")
+				if !ok || len(local) != 12 || strings.Trim(local, lowerChars+digitChars) != "" {
+					t.Fatalf("local part = %q, want 12 lowercase letters and digits", local)
+				}
+				seen[domain]++
+			}
+			if len(seen) != len(domains) {
+				t.Errorf("domains seen = %v, want each of %q", seen, domains)
+			}
+			for _, d := range domains {
+				if seen[d] == 0 {
+					t.Errorf("domain %q never picked: %v", d, seen)
+				}
+			}
+		})
+	}
+}
+
 func TestGeneratePassword(t *testing.T) {
 	tests := []struct {
 		name   string

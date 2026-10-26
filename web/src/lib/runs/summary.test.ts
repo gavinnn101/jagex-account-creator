@@ -13,7 +13,7 @@ const config: Config = {
   database: 'creator.db',
   debug: false,
   email: {
-    imap_domain: 'example.com',
+    imap_domains: ['example.com', 'example.org'],
     imap_host: 'imap.example.com',
     imap_pass_set: true,
     imap_port: 993,
@@ -145,7 +145,7 @@ describe('configEntries', () => {
       ['concurrency.max_workers', '4'],
       ['database', 'creator.db'],
       ['debug', 'false'],
-      ['email.imap_domain', 'example.com'],
+      ['email.imap_domains', 'example.com, example.org'],
       ['email.imap_host', 'imap.example.com'],
       ['email.imap_pass_set', 'true'],
       ['email.imap_port', '993'],
@@ -156,17 +156,28 @@ describe('configEntries', () => {
 
   it('keeps an empty value and gives no row for an absent key', () => {
     const email = {
-      imap_domain: 'example.com',
+      imap_domains: ['example.com'],
       imap_host: 'imap.example.com',
       imap_port: 993,
       imap_user: '',
     };
     const rows = configEntries({ ...config, email });
     expect(rows.filter(([key]) => key.startsWith('email.'))).toEqual([
-      ['email.imap_domain', 'example.com'],
+      ['email.imap_domains', 'example.com'],
       ['email.imap_host', 'imap.example.com'],
       ['email.imap_port', '993'],
       ['email.imap_user', ''],
     ]);
+  });
+
+  it('gives one row for a list, with its items joined', () => {
+    const rows = (domains: string[]) =>
+      configEntries({ ...config, email: { ...config.email, imap_domains: domains } }).filter(
+        ([key]) => key.startsWith('email.imap_domains'),
+      );
+    expect(rows(['a.example', 'b.example', 'c.example'])).toEqual([
+      ['email.imap_domains', 'a.example, b.example, c.example'],
+    ]);
+    expect(rows([])).toEqual([['email.imap_domains', '']]);
   });
 });

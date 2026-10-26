@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -279,6 +281,51 @@ func TestSetUp_FailureChangesNothing(t *testing.T) {
 	}
 	if tables != 0 {
 		t.Errorf("schema holds %d entries, want none", tables)
+	}
+}
+
+// A stored config of version 4 holds one imap_domain. Version 5 holds it as the one item of imap_domains.
+func TestOpen_Version4MovesDomainIntoList(t *testing.T) {
+	dbPath, _ := migratedDB(t, 4)
+	const oldConfig = `{"database":"creator.db","email":{"imap_host":"mail.example.com","imap_domain":"example.com"}}`
+	db, err := openDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.ExecContext(t.Context(), `INSERT INTO runs (source, started_at, config) VALUES ('cli', '2025-01-15T10:30:00.000000000Z', ?)`, oldConfig)
+	if err == nil {
+		_, err = db.ExecContext(t.Context(), `INSERT INTO presets (name, config, saved_at) VALUES ('old', ?, '2025-01-15T10:30:00.000000000Z')`, oldConfig)
+	}
+	// Close releases the file and the WAL, so Windows lets the next Open use them.
+	if err := errors.Join(err, db.Close()); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := openGuarded(t.Context(), t, dbPath, filepath.Join(t.TempDir(), "accounts.jsonl"), logtest.New(io.Discard))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	run, err := s.Run(t.Context(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	presets, err := s.Presets(t.Context())
+	if err != nil || len(presets) != 1 {
+		t.Fatalf("Presets = %+v, %v, want one preset", presets, err)
+	}
+	for name, config := range map[string]json.RawMessage{"run": run.Config, "preset": presets[0].Config} {
+		var got struct {
+			Database string         `json:"database"`
+			Email    map[string]any `json:"email"`
+		}
+		if err := json.Unmarshal(config, &got); err != nil {
+			t.Fatalf("%s config %s: %v", name, config, err)
+		}
+		want := map[string]any{"imap_host": "mail.example.com", "imap_domains": []any{"example.com"}}
+		if got.Database != "creator.db" || !reflect.DeepEqual(got.Email, want) {
+			t.Errorf("%s config = %s, want the database and the email section %v", name, config, want)
+		}
 	}
 }
 

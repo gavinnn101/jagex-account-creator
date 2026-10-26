@@ -312,8 +312,9 @@ type Config struct {
 
 // EmailConfig defines model for EmailConfig.
 type EmailConfig struct {
-	ImapDomain string `json:"imap_domain"`
-	ImapHost   string `json:"imap_host"`
+	// ImapDomains The domains of the new addresses. Each attempt takes one at random.
+	ImapDomains []string `json:"imap_domains"`
+	ImapHost    string   `json:"imap_host"`
 
 	// ImapPass Absent in a response. In a request, absent means the stored password.
 	ImapPass *string `json:"imap_pass,omitempty"`

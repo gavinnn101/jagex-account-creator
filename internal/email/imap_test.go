@@ -24,13 +24,6 @@ import (
 	"jagex_account_creator/internal/logtest"
 )
 
-func TestIMAPProvider_Address(t *testing.T) {
-	p := &IMAPProvider{Domain: "example.com"}
-	if got, want := p.Address("abc123"), "abc123@example.com"; got != want {
-		t.Errorf("Address = %q, want %q", got, want)
-	}
-}
-
 func TestIMAPProvider_PollInterval(t *testing.T) {
 	tests := []struct {
 		set, want time.Duration
@@ -621,7 +614,7 @@ func TestIMAPProvider_WaitRetriesAfterDialFailure(t *testing.T) {
 		t.Fatalf("dial %s: want a refused connection", addr)
 	}
 	logs := &signalWriter{mark: []byte(`msg="IMAP wait failed, trying again"`), seen: make(chan struct{}, 1)}
-	p := &IMAPProvider{Host: "127.0.0.1", Port: port, Domain: "example.com", PollInterval: 10 * time.Millisecond, Logger: logtest.New(logs)}
+	p := &IMAPProvider{Host: "127.0.0.1", Port: port, PollInterval: 10 * time.Millisecond, Logger: logtest.New(logs)}
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

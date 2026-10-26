@@ -19,7 +19,7 @@ A Go tool that creates Jagex accounts. Chrome loads the Jagex page and solves th
 - Google Chrome or Chromium. The tool finds it on the usual install paths, or on `PATH`. Set `CHROME_PATH` to use a different binary.
 - Go, at the version of the `go` line in `go.mod`.
 - Node 26.12.1, the pin of `web/.nvmrc`, to build the dashboard.
-- An IMAP mailbox that gets the mail of every address of one domain (a catch-all). Each attempt makes a new address `<12 random letters and digits>@<imap_domain>`. The tool logs in to the mailbox over TLS and reads the verification code from `INBOX`.
+- An IMAP mailbox that gets the mail of every address of each domain in `imap_domains` (a catch-all). Each attempt takes one of these domains at random and makes a new address `<12 random letters and digits>@<domain>`. The tool logs in to the mailbox over TLS and reads the verification code from `INBOX`.
 - Proxies, HTTP or SOCKS5. A run with no enabled proxy stops at start, unless `proxy.direct` is `true`.
 
 ## Build
@@ -37,7 +37,7 @@ The binary embeds the dashboard. After a change in `web/src`, build the dashboar
 ## Quick start
 
 1. Copy the template: `cp config.yaml config.local.yaml`.
-2. In `config.local.yaml`, set `email.imap_host`, `email.imap_user`, `email.imap_pass` and `email.imap_domain`.
+2. In `config.local.yaml`, set `email.imap_host`, `email.imap_user`, `email.imap_pass` and `email.imap_domains`.
 3. Start serve mode: `./creator -mode serve`.
 4. Open http://127.0.0.1:8080.
 5. On the **Proxies** screen, open "Import proxies". Paste your proxy lines or pick a file, then click Import.
@@ -52,16 +52,18 @@ The **Logs** screen shows the log lines of the run. The **Runs** screen shows th
 
 The keys to set:
 
-| Key                         | Use                                                          |
-| --------------------------- | ------------------------------------------------------------ |
-| `email.imap_host`           | The IMAP server, for example `imap.example.com`              |
-| `email.imap_user`           | The login of the mailbox                                     |
-| `email.imap_pass`           | The password of the mailbox                                  |
-| `email.imap_domain`         | The domain of the new addresses, for example `example.com`   |
-| `database`                  | The path of the SQLite database. The default is `creator.db` |
-| `proxy.direct`              | `true` runs with no proxy and ignores the proxy list         |
-| `concurrency.max_workers`   | The number of attempts in parallel                           |
-| `concurrency.account_count` | The number of accounts to create. `-1` is no limit           |
+| Key                         | Use                                                                                    |
+| --------------------------- | -------------------------------------------------------------------------------------- |
+| `email.imap_host`           | The IMAP server, for example `imap.example.com`                                        |
+| `email.imap_user`           | The login of the mailbox                                                               |
+| `email.imap_pass`           | The password of the mailbox                                                            |
+| `email.imap_domains`        | The list of the domains of the new addresses, for example `[example.com, example.org]` |
+| `database`                  | The path of the SQLite database. The default is `creator.db`                           |
+| `proxy.direct`              | `true` runs with no proxy and ignores the proxy list                                   |
+| `concurrency.max_workers`   | The number of attempts in parallel                                                     |
+| `concurrency.account_count` | The number of accounts to create. `-1` is no limit                                     |
+
+Each entry of `email.imap_domains` is an ASCII domain name with at least one dot, in any case, and no entry repeats. Write a non-ASCII domain in its `xn--` form.
 
 ## CLI use
 

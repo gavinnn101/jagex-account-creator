@@ -261,7 +261,6 @@ func newEmailProvider(cfg *config.Config, logger *slog.Logger) *email.IMAPProvid
 		Port:   cfg.Email.IMAPPort,
 		User:   cfg.Email.IMAPUser,
 		Pass:   cfg.Email.IMAPPass,
-		Domain: cfg.Email.IMAPDomain,
 		Logger: logger.With("component", "email"),
 	}
 }

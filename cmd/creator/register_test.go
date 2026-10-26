@@ -208,8 +208,7 @@ func TestRegisterOverHTTPFetchFailure(t *testing.T) {
 	})
 }
 
-// fakeEmailProvider puts a local part at example.com. Its verification wait
-// records each call and returns code and err.
+// fakeEmailProvider records each verification wait and returns code and err.
 type fakeEmailProvider struct {
 	code  string
 	err   error
@@ -221,10 +220,6 @@ type emailWait struct {
 	address string
 	since   time.Time
 	timeout time.Duration
-}
-
-func (*fakeEmailProvider) Address(local string) string {
-	return local + "@example.com"
 }
 
 func (f *fakeEmailProvider) WaitForVerificationCode(_ context.Context, address string, since time.Time, timeout time.Duration) (string, error) {
@@ -480,14 +475,14 @@ func TestCreateRemoteAccount(t *testing.T) {
 }
 
 func TestGenerateIdentity(t *testing.T) {
-	cfg := &config.Config{Account: config.AccountConfig{PasswordLength: 20}}
+	cfg := &config.Config{Account: config.AccountConfig{PasswordLength: 20}, Email: config.EmailConfig{IMAPDomains: []string{"example.com"}}}
 
 	t.Run("generates every field", func(t *testing.T) {
 		var buf bytes.Buffer
-		a := &attempt{run: &runner{cfg: cfg}, logger: logtest.New(&buf), emailProvider: &fakeEmailProvider{}}
+		a := &attempt{run: &runner{cfg: cfg}, logger: logtest.New(&buf)}
 		id := a.generateIdentity()
 		if local, ok := strings.CutSuffix(id.email, "@example.com"); !ok || len(local) != 12 {
-			t.Errorf("email = %q, want a 12-character local part at example.com", id.email)
+			t.Errorf("email = %q, want a 12-character local part at the domain of the config", id.email)
 		}
 		if id.dob == "" {
 			t.Error("dob is empty")

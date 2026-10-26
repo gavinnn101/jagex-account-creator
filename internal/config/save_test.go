@@ -29,7 +29,7 @@ func savedConfig() *Config {
 		Chrome:   ChromeConfig{Headless: new(false), Timeout: 45 * time.Second},
 		Proxy:    ProxyConfig{Direct: true},
 		Email: EmailConfig{IMAPHost: "mail.example.com", IMAPPort: 143, IMAPUser: "123",
-			IMAPPass: `p@ss: wo#rd "x" 'y'`, IMAPDomain: "example.com"},
+			IMAPPass: `p@ss: wo#rd "x" 'y'`, IMAPDomains: []string{"example.com", "example.org"}},
 		Account:     AccountConfig{PasswordLength: 20, EnableTOTP: new(false)},
 		Concurrency: ConcurrencyConfig{MaxWorkers: 4, MaxBrowsers: 2, AccountCount: -1, AccountTimeout: 90 * time.Second},
 	}
@@ -41,7 +41,7 @@ const (
 	savedChrome = "chrome:\n  headless: false\n  timeout: 45s\n"
 	savedProxy  = "proxy:\n  direct: true\n"
 	savedEmail  = "  imap_host: mail.example.com\n  imap_port: 143\n  imap_user: \"123\"\n" +
-		"  imap_pass: 'p@ss: wo#rd \"x\" ''y'''\n  imap_domain: example.com\n"
+		"  imap_pass: 'p@ss: wo#rd \"x\" ''y'''\n  imap_domains:\n    - example.com\n    - example.org\n"
 	savedRest = "account:\n  password_length: 20\n  enable_totp: false\n" +
 		"concurrency:\n  max_workers: 4\n  max_browsers: 2\n  account_count: -1\n  account_timeout: 1m30s\n"
 	savedAll = savedTop + savedChrome + savedProxy + "email:\n" + savedEmail + savedRest
@@ -73,6 +73,12 @@ func TestSave(t *testing.T) {
 			name: "an empty section gets its keys and keeps its comment",
 			old:  new("email: # the mailbox\n"),
 			want: "email: # the mailbox\n" + savedEmail + savedTop + savedChrome + savedProxy + savedRest,
+		},
+		{
+			name: "a list replaces the old list and keeps its comments",
+			old:  new("email:\n  # the domains\n  imap_domains: # one at random\n    - old.example.com # old\n"),
+			want: "email:\n  # the domains\n  imap_domains: # one at random\n    - example.com\n    - example.org\n" +
+				strings.Replace(savedEmail, "  imap_domains:\n    - example.com\n    - example.org\n", "", 1) + savedTop + savedChrome + savedProxy + savedRest,
 		},
 		{name: "a null document gets the whole config", old: new("null\n"), want: savedAll},
 		{name: "an unknown key is refused", old: new("provider: imap\n"), wantErr: "parsing config file: "},

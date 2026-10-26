@@ -31,7 +31,7 @@ const config: Config = {
     imap_port: 993,
     imap_user: '',
     imap_pass_set: false,
-    imap_domain: '',
+    imap_domains: [],
   },
   account: { password_length: 16, enable_totp: true },
   concurrency: { max_workers: 1, max_browsers: 1, account_count: 1, account_timeout: '1m' },

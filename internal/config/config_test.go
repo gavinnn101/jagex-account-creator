@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +43,9 @@ func TestApplyDefaults(t *testing.T) {
 	if cfg.Email.IMAPPort != 993 {
 		t.Errorf("Email.IMAPPort = %d, want 993", cfg.Email.IMAPPort)
 	}
+	if cfg.Email.IMAPDomains == nil || len(cfg.Email.IMAPDomains) != 0 {
+		t.Errorf("Email.IMAPDomains = %#v, want an empty non-nil list", cfg.Email.IMAPDomains)
+	}
 }
 
 func TestApplyDefaultsPreservesExplicitValues(t *testing.T) {
@@ -61,7 +65,8 @@ func TestApplyDefaultsPreservesExplicitValues(t *testing.T) {
 			AccountTimeout: 3 * time.Minute,
 		},
 		Email: EmailConfig{
-			IMAPPort: 143,
+			IMAPPort:    143,
+			IMAPDomains: []string{"example.com"},
 		},
 	}
 	applyDefaults(cfg)
@@ -93,6 +98,9 @@ func TestApplyDefaultsPreservesExplicitValues(t *testing.T) {
 	if cfg.Email.IMAPPort != 143 {
 		t.Errorf("Email.IMAPPort = %d, want 143", cfg.Email.IMAPPort)
 	}
+	if !slices.Equal(cfg.Email.IMAPDomains, []string{"example.com"}) {
+		t.Errorf("Email.IMAPDomains = %q, want [example.com]", cfg.Email.IMAPDomains)
+	}
 }
 
 func TestApplyDefaultsUnlimitedAccountCount(t *testing.T) {
@@ -111,11 +119,11 @@ func TestApplyDefaultsUnlimitedAccountCount(t *testing.T) {
 
 // validIMAPYAML is a minimal valid email section. Tests of non-email config
 // append their YAML to it.
-const validIMAPYAML = "email:\n  imap_host: mail.example.com\n  imap_user: user\n  imap_pass: pass\n  imap_domain: example.com\n"
+const validIMAPYAML = "email:\n  imap_host: mail.example.com\n  imap_user: user\n  imap_pass: pass\n  imap_domains:\n    - example.com\n"
 
 // validEmail is the struct form of validIMAPYAML.
 func validEmail() EmailConfig {
-	return EmailConfig{IMAPHost: "mail.example.com", IMAPUser: "user", IMAPPass: "pass", IMAPDomain: "example.com"}
+	return EmailConfig{IMAPHost: "mail.example.com", IMAPUser: "user", IMAPPass: "pass", IMAPDomains: []string{"example.com"}}
 }
 
 func TestLoadAccountCount(t *testing.T) {
@@ -337,7 +345,7 @@ func TestLoadEmptyFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the required-field errors for an empty file")
 	}
-	for _, want := range []string{"invalid config", "imap_host", "imap_user", "imap_pass", "imap_domain"} {
+	for _, want := range []string{"invalid config", "imap_host", "imap_user", "imap_pass", "imap_domains"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q, got: %v", want, err)
 		}
@@ -401,6 +409,10 @@ func TestValidateFields(t *testing.T) {
 		{"account_timeout negative", func(c *Config) { c.Concurrency.AccountTimeout = -1 * time.Second }, "concurrency.account_timeout must be positive, got -1s"},
 		{"account_timeout zero", func(c *Config) { c.Concurrency.AccountTimeout = 0 }, "concurrency.account_timeout must be positive, got 0s"},
 		{"database empty", func(c *Config) { c.Database = "" }, "database must not be empty"},
+		{"imap_domains nil", func(c *Config) { c.Email.IMAPDomains = nil }, "email.imap_domains is required"},
+		{"imap_domains empty", func(c *Config) { c.Email.IMAPDomains = []string{} }, "email.imap_domains is required"},
+		{"imap_domains bad entry", func(c *Config) { c.Email.IMAPDomains = []string{"localhost"} }, `email.imap_domains[0] "localhost" is not a valid domain name`},
+		{"imap_domains two domains", func(c *Config) { c.Email.IMAPDomains = []string{"a.example.com", "b.example.com"} }, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -422,6 +434,56 @@ func TestValidateFields(t *testing.T) {
 	}
 }
 
+func TestValidateDomains(t *testing.T) {
+	invalid := func(i int, d string) string {
+		return fmt.Sprintf("email.imap_domains[%d] %q is not a valid domain name", i, d)
+	}
+	tests := []struct {
+		name    string
+		domains []string
+		want    []string // the error texts in order. Empty means valid
+	}{
+		{name: "nil", want: []string{"email.imap_domains is required"}},
+		{name: "empty", domains: []string{}, want: []string{"email.imap_domains is required"}},
+		{name: "one domain", domains: []string{"penguinlover.me"}},
+		{name: "many labels", domains: []string{"sub.example.co.uk"}},
+		{name: "the xn-- form", domains: []string{"xn--bcher-kva.example"}},
+		{name: "upper case passes through the fold", domains: []string{"Sugmad.ME"}},
+		{name: "a space", domains: []string{"foo bar"}, want: []string{invalid(0, "foo bar")}},
+		{name: "an email address", domains: []string{"me@penguinlover.me"}, want: []string{invalid(0, "me@penguinlover.me")}},
+		{name: "a URL", domains: []string{"https://sugmad.me"}, want: []string{invalid(0, "https://sugmad.me")}},
+		{name: "an underscore", domains: []string{"under_score.me"}, want: []string{invalid(0, "under_score.me")}},
+		{name: "a leading space", domains: []string{" sugmad.me"}, want: []string{invalid(0, " sugmad.me")}},
+		{name: "no dot", domains: []string{"localhost"}, want: []string{invalid(0, "localhost")}},
+		{name: "a trailing dot", domains: []string{"sugmad.me."}, want: []string{invalid(0, "sugmad.me.")}},
+		{name: "an IP address", domains: []string{"1.2.3.4"}, want: []string{invalid(0, "1.2.3.4")}},
+		{name: "a last label of digits after a letter", domains: []string{"example.123"}, want: []string{invalid(0, "example.123")}},
+		{name: "a non-ASCII form", domains: []string{"bücher.example"}, want: []string{invalid(0, "bücher.example")}},
+		{name: "a rune that folds to an ASCII letter", domains: []string{"\u212Aelvin.com"}, want: []string{invalid(0, "\u212Aelvin.com")}},
+		{name: "a lone 0x80 byte", domains: []string{"\x80.example.com"}, want: []string{invalid(0, "\x80.example.com")}},
+		{name: "a blank entry gets one error", domains: []string{"a.example.com", " \t"}, want: []string{"email.imap_domains[1] is empty"}},
+		{name: "two blank entries", domains: []string{"", " "}, want: []string{"email.imap_domains[0] is empty", "email.imap_domains[1] is empty"}},
+		{name: "a repeat in another case", domains: []string{"Sugmad.ME", "penguinlover.me", "sugmad.me"}, want: []string{`email.imap_domains[2] "sugmad.me" repeats [0]`}},
+		{name: "a third copy repeats the first", domains: []string{"a.example.com", "a.example.com", "A.example.com"},
+			want: []string{`email.imap_domains[1] "a.example.com" repeats [0]`, `email.imap_domains[2] "A.example.com" repeats [0]`}},
+		{name: "a bad entry is no repeat of a bad entry", domains: []string{"localhost", "a.example.com", "LOCALHOST"},
+			want: []string{invalid(0, "localhost"), invalid(2, "LOCALHOST")}},
+		{name: "the entry errors come before the repeats", domains: []string{"a.example.com", "a.example.com", "localhost"},
+			want: []string{invalid(2, "localhost"), `email.imap_domains[1] "a.example.com" repeats [0]`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			for _, err := range validateDomains(tt.domains) {
+				got = append(got, err.Error())
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("validateDomains(%q) = %q, want %q", tt.domains, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateIMAPRequiredFields(t *testing.T) {
 	tests := []struct {
 		name string
@@ -430,23 +492,23 @@ func TestValidateIMAPRequiredFields(t *testing.T) {
 	}{
 		{
 			name: "missing host",
-			cfg:  EmailConfig{IMAPUser: "u", IMAPPass: "p", IMAPDomain: "d"},
+			cfg:  EmailConfig{IMAPUser: "u", IMAPPass: "p", IMAPDomains: []string{"d"}},
 			want: "imap_host",
 		},
 		{
 			name: "missing user",
-			cfg:  EmailConfig{IMAPHost: "h", IMAPPass: "p", IMAPDomain: "d"},
+			cfg:  EmailConfig{IMAPHost: "h", IMAPPass: "p", IMAPDomains: []string{"d"}},
 			want: "imap_user",
 		},
 		{
 			name: "missing pass",
-			cfg:  EmailConfig{IMAPHost: "h", IMAPUser: "u", IMAPDomain: "d"},
+			cfg:  EmailConfig{IMAPHost: "h", IMAPUser: "u", IMAPDomains: []string{"d"}},
 			want: "imap_pass",
 		},
 		{
 			name: "missing domain",
 			cfg:  EmailConfig{IMAPHost: "h", IMAPUser: "u", IMAPPass: "p"},
-			want: "imap_domain",
+			want: "imap_domains",
 		},
 	}
 	for _, tt := range tests {
@@ -550,6 +612,26 @@ func TestRead(t *testing.T) {
 			check: func(c *Config) string {
 				if c.Database != "creator.db" || c.Concurrency.MaxWorkers != 1 || c.Email.IMAPPort != 993 || c.Email.IMAPHost != "" {
 					return fmt.Sprintf("database, max_workers, imap_port, imap_host = %q, %d, %d, %q", c.Database, c.Concurrency.MaxWorkers, c.Email.IMAPPort, c.Email.IMAPHost)
+				}
+				return ""
+			},
+		},
+		{
+			name: "a bare imap_domains key gives an empty non-nil list",
+			yaml: "email:\n  imap_domains:\n",
+			check: func(c *Config) string {
+				if c.Email.IMAPDomains == nil || len(c.Email.IMAPDomains) != 0 {
+					return fmt.Sprintf("imap_domains = %#v, want an empty non-nil list", c.Email.IMAPDomains)
+				}
+				return ""
+			},
+		},
+		{
+			name: "a list of domains stays in order",
+			yaml: "email:\n  imap_domains: [b.example.com, a.example.com]\n",
+			check: func(c *Config) string {
+				if !slices.Equal(c.Email.IMAPDomains, []string{"b.example.com", "a.example.com"}) {
+					return fmt.Sprintf("imap_domains = %q, want [b.example.com a.example.com]", c.Email.IMAPDomains)
 				}
 				return ""
 			},
