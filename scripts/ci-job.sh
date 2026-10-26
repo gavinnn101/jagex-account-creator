@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the steps of one CI job in order and stops at the first failed step. The last line names that step.
-# Usage: ci-job.sh <ci|ci-windows|mutation|vuln> [base commit]. The base commit goes to the coverage gate.
+# Usage: ci-job.sh <ci|ci-windows|mutation|vuln> [base commit]. The base commit goes to the coverage gates and the mutation gate.
 # The workflows and scripts/local-ci.sh both call this script, so it is the one list of the steps of each job.
 set -euo pipefail
 
@@ -35,6 +35,8 @@ api_drift() { go generate ./internal/api && npm --prefix web run gen:api && git 
 coverage() { bash scripts/coverage-gate.sh ${base:+"$base"}; }
 
 web_coverage() { bash scripts/web-coverage-gate.sh ${base:+"$base"}; }
+
+mutation() { bash scripts/mutation-gate.sh ${base:+"$base"}; }
 
 # The binary goes to a temp dir, so the run leaves the tree as the checkout made it.
 e2e() {
@@ -82,7 +84,7 @@ case "$job" in
   # A separate job, so a pull request waits for the slower job and not for the sum.
   mutation)
     step node node_pin
-    step mutation bash scripts/mutation-gate.sh
+    step mutation mutation
     ;;
   vuln)
     step node node_pin

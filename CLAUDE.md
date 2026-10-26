@@ -135,7 +135,8 @@ scripts/
   local-ci.sh            # Runs the four CI jobs on the head of a pull request on this host and posts each result as a commit status
   golangci-lint.sh       # Builds golangci-lint from source at the pin and runs it (CI and `make lint`)
   coverage-gate.sh       # Test run and coverage gate (CI and `make cover`)
-  mutation-gate.sh       # Mutation gate (CI and `make mutate`)
+  mutation-gate.sh       # Mutation gate (CI, `make mutate` and `make mutate-full`)
+  mutation-scope.sh      # The files that a run of the mutation gate mutates, sourced by the gate
   vuln-gate.sh           # Vulnerability gate (CI and `make vuln`)
   deadcode-gate.sh       # Reachability gate (CI and `make deadcode`)
   web-coverage-gate.sh   # Web coverage gate (CI): the uncovered statements of web/, head against base
@@ -1174,13 +1175,24 @@ if err != nil {
 - Annotate a function only when its body is the external call plus error wrapping or logging, or when its success path cannot complete without the resource. A function with logic that a fake can drive gets a test.
 - The coverage gate and gremlins skip `internal/api/api.gen.go`, the generated code. Each gate names the file in its own config line. A second generated Go file adds its own line in each gate. The `mutate` list of `web/stryker.config.json` skips the generated `web/src/lib/api.gen.d.ts`.
 - A `web/src/lib/*test/` dir, such as `streamtest/` or `configtest/`, holds the shared helpers of the web tests. Only test files import it. It has its own test, as a Go `*test` package does. A helper dir that one test alone imports, such as `clocktest/`, has no test of its own, because that test covers it. The web coverage gate and Stryker judge it as any other file.
-- CI runs `scripts/mutation-gate.sh`. It has two halves. gremlins mutates the Go code, and Stryker mutates `web/src` through `npm --prefix web run mutate`. The gate fails when the tests still pass or time out on a mutant of a covered line. It prints each such mutant as `file:line TYPE STATUS`, with the file relative to the repo root. `make mutate` runs the same script. It needs Linux, `jq` and the Node of `web/.nvmrc`.
+- CI runs `scripts/mutation-gate.sh`. It has two halves. gremlins mutates the Go code, and Stryker mutates `web/src` through `npm --prefix web run mutate`. The gate fails when the tests still pass or time out on a mutant of a covered line. It prints each such mutant as `file:line TYPE STATUS`, with the file relative to the repo root. It needs Linux, and it fails on any other host. It also needs `jq` and the Node of `web/.nvmrc`.
+- `scripts/mutation-gate.sh [base|full]` takes a base commit, by default the merge base with origin/main. `make mutate` runs it with that default, and `make mutate-full` runs it with `full`. The `mutation` job passes the base of `scripts/ci-job.sh`.
+- With a base, each half mutates only its scope. `mutation_scope` in `scripts/mutation-scope.sh` is the one home of the scope:
+  - The changed files are the files of `git diff --merge-base <base>`, deleted files included, and the untracked files.
+  - The Go scope is each changed non-test `.go` file, and each non-test `.go` file in the dir of a changed `_test.go` file. The web scope is each changed `.ts` or `.svelte` file under `web/src`, and each such file in the dir of a changed `*.test.ts` file. A deleted test counts. `web/e2e` and a `.go` file under a `testdata` dir add nothing.
+  - A change to a test-helper dir runs the full half of its language. A Go helper dir is a `*test` package, and a web helper dir is a `web/src/lib/*test/` dir.
+  - A change to one of the trigger files runs both halves in full. The list is in `mutation_scope`. It holds the two gate scripts, `web/stryker.config.json`, `web/patch-stryker-runner.ts`, `web/vite.config.ts`, `web/package.json` and `go.mod`.
+  - A half with an empty scope skips its tool. A skipped Stryker half also skips `npm ci` and the Playwright install.
+  - The last line gives the mode and the file count of each half, and the killed count of each tool that ran.
+- Limitation: a change that weakens a test outside the dirs of its changed files passes. Only a full run catches it.
+- Limitation: the full run of a pull request needs a change to a trigger file. Dependabot's weekly gomod or npm pull request changes `go.mod` or `web/package.json` only when an update exists. While the workflows stay off, run `scripts/local-ci.sh <PR>` on it. `make mutate-full` is the manual full run.
+- Limitation: a `.go` file behind a non-Linux build tag gets no covered mutant, in a scope as in a full run.
 - A gremlins survivor is `LIVED` or `TIMED OUT`. A Stryker survivor is `Survived` or `Timeout`. A Stryker `NoCoverage` mutant goes to the web coverage gate, as a gremlins `NOT COVERED` mutant goes to the Go coverage gate.
 - gremlins runs on a copy of the working tree. The copy holds the files of `git ls-files --cached --others --exclude-standard`, so it has no ignored path, such as `web/node_modules`. So `make mutate` tests the tree that the developer has.
-- The mutation gate fails when gremlins kills no mutant. It also fails when Stryker kills no mutant.
+- In a full half, the mutation gate fails when its tool kills no mutant. A scoped half has no such check, because each mutant of a scoped file can lack a covering test.
 - Limitation: when `web/node_modules` exists, Stryker uses it as it is. A stale dir on a dev host fails toward a local run on stale dependencies, never a false CI pass. In CI, the dir comes from `npm ci` of the same commit.
 - A mutant that no test can kill carries `// mutation-ignore: <TYPE>[, <TYPE>]: <reason>` on its source line. In Svelte markup, the opener is `<!--` in place of `//`. `<TYPE>` is the type that the gate prints. A gremlins type is upper case, for example `CONDITIONALS_BOUNDARY`. A Stryker type is CamelCase, for example `EqualityOperator`.
-- A waiver covers only the listed types. The gate fails when a listed type has no surviving mutant on the line, and prints `file:line TYPE stale waiver`. The stale check reads the `.go` files and the `.ts` and `.svelte` files under `web/src`. Prefer a test or a simpler expression to a waiver.
+- A waiver covers only the listed types. The gate fails when a listed type has no surviving mutant on the line, and prints `file:line TYPE stale waiver`. The stale check reads only the files that the run mutated. A full Go half gives it the `.go` files, and a full web half the `.ts` and `.svelte` files under `web/src`. A scoped half gives it its scope. Prefer a test or a simpler expression to a waiver.
 - A `Stryker disable` or `Stryker restore` comment under `web/src` fails the mutation gate. Stryker reports a disabled mutant as `Ignored` and never runs it, so the stale check cannot see it. Use a waiver.
 - Limitation: the disable check also refuses a comment that only names the directive.
 - A test that asserts a duration runs inside `synctest.Test` and asserts the exact value. A test on a real socket asserts no duration tighter than its guard. The test waits on the event under a guard. The guard fails the test when it fires. A guard is at least 2s and at most 10s. The 10s cap keeps a guard below the mutation gate's per-mutant timeout. `synctest.Test` goes inside each `t.Run`, because a bubble must not call `t.Run` or `t.Parallel`. A guard also bounds the real work of the test, and a runner disk can be slow. So a test under a guard does few disk syncs.
@@ -1232,7 +1244,7 @@ if err != nil {
     7. The Playwright Chromium install.
     8. A `go build` of the binary into a temp dir, then `test:e2e` with `CREATOR_BIN` set to that binary.
   - `vuln`: after govulncheck, `npm --prefix web ci` and `npm --prefix web audit --audit-level=high`. The bundled libraries of the dashboard are dev dependencies, so the audit reads the whole tree.
-  - `mutation`: the mutation gate, with both halves.
+  - `mutation`: the mutation gate with its base, so each half mutates only its scope.
   - `ci-windows` needs no Node. The embed of `web/dist` builds with the tracked `.gitkeep` alone.
 - `.github/dependabot.yml` opens weekly update pull requests for npm in `/web`, gomod and github-actions. One group holds the minor and patch updates of each ecosystem. A release waits 7 days before its pull request.
 - While both workflows stay off, a Dependabot pull request gets no check. Run `scripts/local-ci.sh <PR>` on each one.

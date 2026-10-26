@@ -1,4 +1,4 @@
-.PHONY: build release spa clean test generate cover mutate vuln deadcode fmt lint check
+.PHONY: build release spa clean test generate cover mutate mutate-full vuln deadcode fmt lint check
 
 BINARY  := creator
 PKG     := ./cmd/creator/
@@ -24,8 +24,13 @@ generate:
 cover:
 	bash scripts/coverage-gate.sh
 
+# Mutates only the files that changed since the merge base with origin/main.
 mutate:
 	bash scripts/mutation-gate.sh
+
+# Mutates every file.
+mutate-full:
+	bash scripts/mutation-gate.sh full
 
 vuln:
 	bash scripts/vuln-gate.sh
