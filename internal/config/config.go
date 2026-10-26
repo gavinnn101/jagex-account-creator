@@ -10,8 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
+	"unicode/utf8"
 
+	"golang.org/x/net/idna"
 	"gopkg.in/yaml.v3"
 )
 
@@ -74,6 +77,7 @@ func Defaults() *Config {
 // The new file replaces the old one in one rename, with mode 0600.
 // Limitation: a save drops the blank lines between sections, the alignment of line comments and the quote style of a value. The comment text stays.
 // Limitation: a CRLF file comes back with LF line endings, and its first save puts one blank line inside each multi-line comment block.
+// Limitation: a list in flow style comes back in block style, and its line comment moves to the next key.
 // Limitation: on Windows, a rename over a file that another process holds open fails and the old file stays. Mode bits do nothing on Windows. A symlink at path becomes a plain file.
 func Save(path string, cfg *Config) error {
 	old, err := os.ReadFile(path)
@@ -203,6 +207,10 @@ func applyDefaults(cfg *Config) {
 	if cfg.Email.IMAPPort == 0 {
 		cfg.Email.IMAPPort = 993
 	}
+	if cfg.Email.IMAPDomains == nil {
+		// The API contract promises an array, and a nil slice encodes as JSON null.
+		cfg.Email.IMAPDomains = []string{}
+	}
 }
 
 // Validate checks cfg for invalid values. It fills no default, so a caller
@@ -240,11 +248,63 @@ func Validate(cfg *Config) error {
 	if cfg.Email.IMAPPass == "" {
 		errs = append(errs, errors.New("email.imap_pass is required"))
 	}
-	if cfg.Email.IMAPDomain == "" {
-		errs = append(errs, errors.New("email.imap_domain is required"))
-	}
+	errs = append(errs, validateDomains(cfg.Email.IMAPDomains)...)
 
 	return errors.Join(errs...)
+}
+
+// asciiLetters are the letters that the last label of a domain must hold one of.
+const asciiLetters = "abcdefghijklmnopqrstuvwxyz"
+
+// validateDomains checks the domain list. Each entry gets at most one error. The
+// repeat check reads only the valid entries and ignores case.
+func validateDomains(domains []string) []error {
+	if len(domains) == 0 {
+		return []error{errors.New("email.imap_domains is required")}
+	}
+	var errs []error
+	var valid []int
+	for i, d := range domains {
+		switch {
+		case strings.TrimSpace(d) == "":
+			errs = append(errs, fmt.Errorf("email.imap_domains[%d] is empty", i))
+		case !validDomain(d):
+			errs = append(errs, fmt.Errorf("email.imap_domains[%d] %q is not a valid domain name", i, d))
+		default:
+			valid = append(valid, i)
+		}
+	}
+	first := make(map[string]int, len(valid))
+	for _, j := range valid {
+		lower := strings.ToLower(domains[j])
+		if i, ok := first[lower]; ok {
+			errs = append(errs, fmt.Errorf("email.imap_domains[%d] %q repeats [%d]", j, domains[j], i))
+			continue
+		}
+		first[lower] = j
+	}
+	return errs
+}
+
+// validDomain reports whether d is an ASCII domain name, in any case, with at
+// least two labels whose last label holds a letter, so an IP address fails.
+// A non-ASCII byte fails before the fold, because the Unicode fold turns some
+// runes into ASCII letters. So the operator types the xn-- form. The profile
+// refuses an empty label, a trailing dot included. It returns an ASCII input
+// unchanged, so only its error counts.
+func validDomain(d string) bool {
+	for i := range len(d) {
+		if d[i] >= utf8.RuneSelf { // mutation-ignore: CONDITIONALS_BOUNDARY: equivalent: the fold makes a lone 0x80 byte U+FFFD, which the profile refuses
+			return false
+		}
+	}
+	lower := strings.ToLower(d)
+	// The registration profile checks a domain as a registry does, so a typo or a pasted URL fails the validation.
+	if _, err := idna.Registration.ToASCII(lower); err != nil {
+		return false
+	}
+	labels := strings.Split(lower, ".")
+	return len(labels) > 1 && strings.ContainsAny(labels[len(labels)-1], asciiLetters)
 }
 
 // validateConcurrency checks the concurrency section. It skips the max_browsers

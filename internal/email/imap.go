@@ -29,16 +29,10 @@ type IMAPProvider struct {
 	Port         int    // IMAP server port (typically 993 for TLS)
 	User         string // IMAP login username (full email)
 	Pass         string // IMAP login password
-	Domain       string // Domain of the mailbox addresses
 	PollInterval time.Duration
 	Logger       *slog.Logger
 
 	dialFn func(ctx context.Context, addr string) (net.Conn, error) // test override
-}
-
-// Address returns local at the configured domain.
-func (p *IMAPProvider) Address(local string) string {
-	return local + "@" + p.Domain
 }
 
 // pollInterval returns PollInterval, or 2s when it is zero.

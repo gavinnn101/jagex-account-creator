@@ -51,7 +51,7 @@ cmd/
 internal/
   account/
     types.go             # Account data types
-    generator.go         # Username, email local part, password, DOB generation
+    generator.go         # Username, email address (a random local part at a random domain of the list), password, DOB generation
     totp.go              # TOTP (2FA) code generation (RFC 6238), and the current code with the seconds left in its window
   api/
     openapi.yaml         # The HTTP API contract of serve mode (OpenAPI 3.1)
@@ -119,6 +119,7 @@ internal/
       0002_runs.sql      # The STRICT runs and attempts tables. An attempt row links its run, and its saved account when it has one
       0003_proxies.sql   # The STRICT proxies table: one row for each proxy with its credentials. Also the index of the attempts on their proxy
       0004_presets.sql   # The STRICT presets table: one row for each named run config
+      0005_imap_domains.sql # The one imap_domain of each stored run and preset config becomes the one item of imap_domains
   useragent/
     clienthints.go       # Shared ClientHints type (used by browser + jagexapi packages). It maps each hint to its header name
     language.go          # The browser language: Chrome's --accept-lang and the HTTP client's accept-language
@@ -491,13 +492,13 @@ proxy:
   direct: false          # Run with no proxy and ignore the list
 
 email:
-  # Required: imap_host, imap_user, imap_pass, imap_domain.
+  # Required: imap_host, imap_user, imap_pass, imap_domains.
   # A failed login at start stops the run.
   imap_host: ""
   imap_port: 993
   imap_user: ""
   imap_pass: ""
-  imap_domain: ""        # Domain for generated addresses (e.g., "example.com")
+  imap_domains: []       # Domains of the generated addresses (e.g., [example.com, example.org]). Each attempt takes one at random
 
 account:
   password_length: 16
@@ -511,6 +512,8 @@ concurrency:
 ```
 
 `account_timeout` covers the attempt up to the password POST. The work after the POST has its own bounds, so the real upper bound is `account_timeout` + 60 s.
+
+Each entry of `imap_domains` is an ASCII domain name with at least one dot, in any case, and no entry repeats. A non-ASCII domain goes in its `xn--` form.
 
 The config holds no proxy list. The store holds it, and the Proxies screen edits it. The one-time import of `proxies.txt` from the directory of the database moves a proxy file into the store. See "Account store and exports".
 
@@ -557,7 +560,7 @@ Limitation: a preset holds no IMAP password, so a preset of another mailbox need
 
 A run keeps the config that it started with, so a save during a run does not change the run. One lock holds a save from the validation to the swap, so two saves do not interleave.
 
-Limitation: a save drops the blank lines between sections, the alignment of line comments and the quote style of a value. The comment text stays. A CRLF file comes back with LF line endings, and its first save puts one blank line inside each multi-line comment block.
+Limitation: a save drops the blank lines between sections, the alignment of line comments and the quote style of a value. The comment text stays. A CRLF file comes back with LF line endings, and its first save puts one blank line inside each multi-line comment block. A list in flow style comes back in block style, and its line comment moves to the next key.
 
 Limitation: a save writes every key, also a key that the file left to its default. It overwrites a hand edit of the file made after serve read it. This fails toward the values of the dashboard.
 
@@ -897,7 +900,7 @@ The run screen at `/` shows these parts, from top to bottom:
 1. The control bar: Start, Stop, Stop now and the presets control. A line under the buttons tells the two stops apart. The run error and the errors of a refused request show under that line.
 2. The status: four cards, then the tables of the workers, the failures and the proxy cooldowns. The cards are the accounts, the success rate, the accounts per hour and the bandwidth per account. Before the first run, one line replaces the cards and the tables. The workers table shows only until the run ends. While a run in progress has no worker, one line replaces that table. The two other tables show only when they have rows.
 3. The chart of the run. It takes the width of its box. The time labels use a round step, such as 2 minutes or 1 hour. The bound is one label for each 90 px of the width, but the bound is never below two labels. The chart uses the finest round step in the bound. When that step gives fewer than two labels, the chart keeps every k-th tick of the next finer step, in the bound. For example, 2-minute labels become 4-minute labels. When the year step gives too many labels, the chart keeps every k-th year in the same way. The finest step is 1 second, so the chart shows at least two labels when the run is 2 seconds long or longer. A shorter run shows one label or none.
-4. The config form, in folding sections. Only the run settings start open. A closed section shows a digest of its values.
+4. The config form, in folding sections. Only the run settings start open. A closed section shows a digest of its values. The Mailbox section takes the IMAP domains in a text area, one domain on each line. It drops a blank line and the spaces around a domain.
 
 The page holds one edited copy of the config. `web/src/lib/run/edited.ts` gives it to the control bar and the config form through a context. Start sends the copy. Save sends `PUT /api/config` with the copy. A refused save shows its errors in the form. After a save, the form clears the typed IMAP password and shows the stored placeholder. Save stays on during a run, because a run keeps the config that it started with.
 
@@ -949,7 +952,7 @@ The run detail at `/runs/<id>` has these parts:
 - The header: the id, the status badge, the accounts link and the log download. A run with a clean end has an "Ended" badge.
 - The run error in the danger color, when the run has one.
 - Three lists. Timing holds the source, the start, the end and the duration. The start and the end show as the full time and the relative time. Results holds the counts, the success rate and the failures by category. Traffic holds the bytes of each phase with a byte, or "None".
-- The config: the digest of each of the five sections, then the folding section "All values". It starts closed. It holds one row for each dotted key, from `web/src/lib/runs/summary.ts`.
+- The config: the digest of each of the five sections, then the folding section "All values". It starts closed. It holds one row for each dotted key, from `web/src/lib/runs/summary.ts`. A list, such as `email.imap_domains`, is one row, with its items joined by commas.
 
 The Accounts screen at `/accounts` lists the accounts of the store, newest first. The filters live in the page query, and a GET form submits them. `web/src/lib/accounts/query.ts` builds the API query from the page query. It drops each empty value. It sends each time of the form as RFC 3339 in UTC, because the form gives a local time with no zone. The export links and the next page link use the same module. The list has these parts:
 
@@ -1001,7 +1004,7 @@ Limitation: the confirm step widens the pinned column, so "Confirm delete" can l
 
 With no proxy, the screen shows "No proxies yet. Import a proxy file below." and the open import section. It shows no table, no "Test all enabled" and no export link.
 
-`web/src/lib/proxies/` holds the import form, the pool of "Test all enabled" and the match of a cooldown to its proxy. Its `testView` gives the badge and the error text of a test. Its `proxyColumns` gives the optional columns from the listed proxies, their cooldowns and their tests. `web/src/lib/ui/TextArea.svelte` is the wrapper of the import text. The config form of the run screen shows a `direct` checkbox for `proxy.direct`.
+`web/src/lib/proxies/` holds the import form, the pool of "Test all enabled" and the match of a cooldown to its proxy. Its `testView` gives the badge and the error text of a test. Its `proxyColumns` gives the optional columns from the listed proxies, their cooldowns and their tests. `web/src/lib/ui/TextArea.svelte` is the wrapper of the import text and of the IMAP domains of the Mailbox section. The config form of the run screen shows a `direct` checkbox for `proxy.direct`.
 
 The Checks screen at `/checks` has two sections:
 
@@ -1085,15 +1088,12 @@ The email provider interface (`internal/email/provider.go`):
 
 ```go
 type Provider interface {
-    // Address returns the address of the mailbox with the local part local
-    Address(local string) string
-
     // WaitForVerificationCode polls for a verification email and returns the verification code
     WaitForVerificationCode(ctx context.Context, address string, since time.Time, timeout time.Duration) (string, error)
 }
 ```
 
-`IMAPProvider`, with IDLE support, is the only implementation. The config loader fails when a required IMAP field is empty. The run checks the mailbox login at start.
+`IMAPProvider`, with IDLE support, is the only implementation. It matches a mail by its full recipient address, so it reads the mail of each domain of `imap_domains`. `account.GenerateEmail` makes the address. The config loader fails when a required IMAP field is empty. The run checks the mailbox login at start.
 
 ---
 

@@ -26,11 +26,11 @@ type ProxyConfig struct {
 
 // EmailConfig holds settings for the email verification provider.
 type EmailConfig struct {
-	IMAPHost   string `yaml:"imap_host"`
-	IMAPPort   int    `yaml:"imap_port"`
-	IMAPUser   string `yaml:"imap_user"`
-	IMAPPass   string `yaml:"imap_pass"`
-	IMAPDomain string `yaml:"imap_domain"`
+	IMAPHost    string   `yaml:"imap_host"`
+	IMAPPort    int      `yaml:"imap_port"`
+	IMAPUser    string   `yaml:"imap_user"`
+	IMAPPass    string   `yaml:"imap_pass"`
+	IMAPDomains []string `yaml:"imap_domains"` // each attempt takes one at random for its address
 }
 
 // AccountConfig holds settings for generated accounts.

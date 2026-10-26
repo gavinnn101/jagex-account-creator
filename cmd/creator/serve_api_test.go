@@ -30,7 +30,7 @@ import (
 // complete email section. An empty pass leaves imap_pass out of the file.
 func storedConfig(t *testing.T, pass string) *config.Config {
 	t.Helper()
-	content := "email:\n  imap_host: mail.example.com\n  imap_user: user\n  imap_domain: example.com\n"
+	content := "email:\n  imap_host: mail.example.com\n  imap_user: user\n  imap_domains: [example.com]\n"
 	if pass != "" {
 		content += "  imap_pass: " + pass + "\n"
 	}
@@ -94,7 +94,7 @@ func TestGetConfig(t *testing.T) {
 			want := api.Config{
 				Database:    "creator.db",
 				Chrome:      api.ChromeConfig{Headless: true, Timeout: "1m0s"},
-				Email:       api.EmailConfig{ImapHost: "mail.example.com", ImapPort: 993, ImapUser: "user", ImapDomain: "example.com", ImapPassSet: new(pass != "")},
+				Email:       api.EmailConfig{ImapHost: "mail.example.com", ImapPort: 993, ImapUser: "user", ImapDomains: []string{"example.com"}, ImapPassSet: new(pass != "")},
 				Account:     api.AccountConfig{PasswordLength: 16, EnableTotp: true},
 				Concurrency: api.ConcurrencyConfig{MaxWorkers: 1, MaxBrowsers: 1, AccountCount: 1, AccountTimeout: "5m0s"},
 			}
@@ -209,7 +209,7 @@ func TestCheckChrome(t *testing.T) {
 }
 
 func TestCheckMailbox(t *testing.T) {
-	const section = `{"imap_host":"posted.example.com","imap_port":143,"imap_user":"posted-user","imap_domain":"posted.example.com"`
+	const section = `{"imap_host":"posted.example.com","imap_port":143,"imap_user":"posted-user","imap_domains":["posted.example.com","other.example.com"]`
 	loginErr := errors.New("login refused")
 	tests := []struct {
 		name     string
@@ -237,8 +237,8 @@ func TestCheckMailbox(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("result = %+v, want %+v", got, tt.want)
 			}
-			wantEmail := config.EmailConfig{IMAPHost: "posted.example.com", IMAPPort: 143, IMAPUser: "posted-user", IMAPPass: tt.wantPass, IMAPDomain: "posted.example.com"}
-			if gotCfg == nil || gotCfg.Email != wantEmail || gotCfg.Database != cfg.Database {
+			wantEmail := config.EmailConfig{IMAPHost: "posted.example.com", IMAPPort: 143, IMAPUser: "posted-user", IMAPPass: tt.wantPass, IMAPDomains: []string{"posted.example.com", "other.example.com"}}
+			if gotCfg == nil || !reflect.DeepEqual(gotCfg.Email, wantEmail) || gotCfg.Database != cfg.Database {
 				t.Fatalf("the login got %+v, want the stored config with the email section %+v", gotCfg, wantEmail)
 			}
 			if cfg.Email.IMAPHost != "mail.example.com" {
@@ -298,9 +298,22 @@ func fillConfig(v reflect.Value) {
 			f.SetInt(int64(i + 1))
 		case f.Kind() == reflect.Bool:
 			f.SetBool(true)
+		case f.Type() == reflect.TypeFor[[]string]():
+			f.Set(reflect.ValueOf([]string{v.Type().Field(i).Name, "second"}))
 		default:
 			f.SetString(v.Type().Field(i).Name)
 		}
+	}
+}
+
+// The text is the check, because a nil and an empty list are equal as values but encode differently.
+func TestDefaultsAPIConfigDomainsEncodeAsArray(t *testing.T) {
+	text, err := json.Marshal(apiConfig(config.Defaults()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(text), `"imap_domains":[]`) {
+		t.Errorf("JSON of the defaults = %s, want it to hold \"imap_domains\":[]", text)
 	}
 }
 
@@ -359,7 +372,7 @@ func TestAPIConfigMatchesConfig(t *testing.T) {
 }
 
 // savedFile is the config file of savingAPI.
-const savedFile = "# the mailbox\nemail:\n  imap_host: mail.example.com\n  imap_user: user\n  imap_pass: stored\n  imap_domain: example.com\n"
+const savedFile = "# the mailbox\nemail:\n  imap_host: mail.example.com\n  imap_user: user\n  imap_pass: stored\n  imap_domains:\n    - example.com\n"
 
 // savingAPI returns an apiServer whose config file is config.local.yaml in a
 // new working dir. The file holds savedFile, and the server logs to buf.

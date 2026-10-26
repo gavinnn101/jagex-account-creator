@@ -29,6 +29,13 @@ func GenerateName() string {
 	return string(buf)
 }
 
+// GenerateEmail returns a new account's email address: a GenerateName local
+// part at one domain of domains, picked at random. The list must hold at least
+// one domain. An empty list panics. The config validation is the only producer.
+func GenerateEmail(domains []string) string {
+	return GenerateName() + "@" + domains[cryptoRandIntn(len(domains))]
+}
+
 // GeneratePassword returns a cryptographically random password of the given
 // length. The password is guaranteed to contain at least one uppercase letter,
 // one lowercase letter, one digit, and one special character.

@@ -82,7 +82,7 @@ func TestParseFlagsCountZeroFailsLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	content := "email:\n  imap_host: mail.example.com\n  imap_user: user\n  imap_pass: pass\n  imap_domain: example.com\n"
+	content := "email:\n  imap_host: mail.example.com\n  imap_user: user\n  imap_pass: pass\n  imap_domains: [example.com]\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -112,12 +112,12 @@ func TestParseFlagsListen(t *testing.T) {
 // serve mode starts on a missing file, and it refuses the config flags.
 func TestLoadConfig(t *testing.T) {
 	const (
-		valid  = "email:\n  imap_host: mail.example.com\n  imap_user: user\n  imap_pass: pass\n  imap_domain: example.com\n"
+		valid  = "email:\n  imap_host: mail.example.com\n  imap_user: user\n  imap_pass: pass\n  imap_domains: [example.com]\n"
 		loaded = `level=INFO msg="config loaded" file=config.local.yaml` + "\n"
 	)
 	count := []func(*config.Config){func(cfg *config.Config) { cfg.Concurrency.AccountCount = 7 }}
 	withEmail := config.Defaults()
-	withEmail.Email = config.EmailConfig{IMAPHost: "mail.example.com", IMAPPort: 993, IMAPUser: "user", IMAPPass: "pass", IMAPDomain: "example.com"}
+	withEmail.Email = config.EmailConfig{IMAPHost: "mail.example.com", IMAPPort: 993, IMAPUser: "user", IMAPPass: "pass", IMAPDomains: []string{"example.com"}}
 	withEmail.Concurrency.AccountCount = 7
 	tests := []struct {
 		name, mode, content string

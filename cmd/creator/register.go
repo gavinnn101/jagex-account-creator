@@ -170,7 +170,7 @@ type identity struct {
 // generateIdentity generates the email address, the date of birth and the
 // credentials of a new account.
 func (a *attempt) generateIdentity() identity {
-	emailAddr := a.emailProvider.Address(account.GenerateName())
+	emailAddr := account.GenerateEmail(a.run.cfg.Email.IMAPDomains)
 	a.logger.Debug("generated email", "email", emailAddr)
 
 	dob := account.GenerateDOB()
