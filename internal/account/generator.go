@@ -30,8 +30,8 @@ func GenerateName() string {
 }
 
 // GenerateEmail returns a new account's email address: a GenerateName local
-// part at one domain of domains, picked at random. The list must hold at least
-// one domain. An empty list panics. The config validation is the only producer.
+// part at one domain of domains, picked at random. An empty list panics.
+// config.Validate refuses an empty list, so no run reaches the panic.
 func GenerateEmail(domains []string) string {
 	return GenerateName() + "@" + domains[cryptoRandIntn(len(domains))]
 }

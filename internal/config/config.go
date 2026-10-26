@@ -286,12 +286,9 @@ func validateDomains(domains []string) []error {
 	return errs
 }
 
-// validDomain reports whether d is an ASCII domain name, in any case, with at
-// least two labels whose last label holds a letter, so an IP address fails.
-// A non-ASCII byte fails before the fold, because the Unicode fold turns some
-// runes into ASCII letters. So the operator types the xn-- form. The profile
-// refuses an empty label, a trailing dot included. It returns an ASCII input
-// unchanged, so only its error counts.
+// validDomain reports whether d is an ASCII domain name, in any case, with a dot
+// and a letter in its last label. The non-ASCII check runs before the fold, because
+// the fold turns some runes into ASCII letters. The profile refuses an empty label.
 func validDomain(d string) bool {
 	for i := range len(d) {
 		if d[i] >= utf8.RuneSelf { // mutation-ignore: CONDITIONALS_BOUNDARY: equivalent: the fold makes a lone 0x80 byte U+FFFD, which the profile refuses
