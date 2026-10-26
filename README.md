@@ -145,7 +145,8 @@ The API has no login. Use a LAN `-listen` address only on a trusted network. Any
 make test         # go test -race ./...
 make cover        # the tests and the coverage gate
 make lint         # golangci-lint at the pinned version
-make mutate       # the mutation gate. Needs Linux, jq and the Node of web/.nvmrc
+make mutate       # the mutation gate on the files that the branch changed. Needs Linux, jq and the Node of web/.nvmrc
+make mutate-full  # the mutation gate on every file
 make vuln         # the vulnerability gate
 make deadcode     # the reachability gate
 ```
