@@ -22,8 +22,7 @@
   );
   // The relative times move on in steps of a minute, so a tick each 30 s is enough.
   const time = clock(30_000);
-  // A test can kill the mutant of this path in the script.
-  const runHref = resolve('/');
+  const runHref = resolve('/'); // mutation-ignore: StringLiteral: '' also resolves to /
 
   // Limitation: the rule reads one page, so a column can show on one page and hide on the next.
   const runColumn = $derived(accounts.some((a) => a.run_id !== undefined));
