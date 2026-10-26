@@ -87,6 +87,8 @@ it('draws the border in the text color on hover', async () => {
   const { link } = await renderBadge((s) => {
     s.emit(runState('idle'));
   });
+  // The browser keeps the pointer between runs, so an earlier hover can sit on the badge. Move it off.
+  await link.unhover();
   const before = getComputedStyle(pill(link)).borderColor;
   expect(before).not.toBe(getComputedStyle(pill(link)).color);
   await link.hover();

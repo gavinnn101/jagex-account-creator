@@ -192,6 +192,8 @@ describe('table', () => {
     const screen = await renderPage();
     const link = table(screen).getByRole('link', { name: 'b@example.com' });
     const line = () => getComputedStyle(link.element()).textDecorationLine;
+    // The browser keeps the pointer between runs, so an earlier hover can sit on the link. Move it off.
+    await screen.getByRole('heading', { level: 1 }).hover();
     expect(line()).toBe('none');
     // The keyboard reaches the link, so the focus is visible.
     for (let tabs = 0; tabs < 30 && document.activeElement !== link.element(); tabs += 1) {
