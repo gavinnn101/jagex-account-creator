@@ -11,6 +11,7 @@
   import Checkbox from '#lib/ui/Checkbox.svelte';
   import Details from '#lib/ui/Details.svelte';
   import Field from '#lib/ui/Field.svelte';
+  import TextArea from '#lib/ui/TextArea.svelte';
 
   interface Props {
     /** The fetch of the mailbox check. */
@@ -33,6 +34,29 @@
     } else {
       config.email.imap_pass = value;
     }
+  }
+
+  // The typed text of the domains, so a blank line or a trailing newline stays while the user types.
+  let typedDomains: string | undefined = $state();
+
+  function domainLines(text: string): string[] {
+    return text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '');
+  }
+
+  // A list that the typed text does not give came from outside, for example a preset Load.
+  function getDomains(): string {
+    const shown = config.email.imap_domains.join('\n');
+    return typedDomains !== undefined && domainLines(typedDomains).join('\n') === shown
+      ? typedDomains
+      : shown;
+  }
+
+  function setDomains(text: string): void {
+    typedDomains = text;
+    config.email.imap_domains = domainLines(text);
   }
 </script>
 
@@ -81,7 +105,7 @@
 
   <Details summary="Mailbox" digest={mailboxDigest(config)}>
     <div class="flex flex-col gap-gap">
-      <div class="grid gap-gap sm:grid-cols-2 lg:grid-cols-3">
+      <div class="grid gap-gap sm:grid-cols-2 lg:grid-cols-4">
         <Field label="IMAP host" bind:value={config.email.imap_host} />
         <Field
           label="IMAP port"
@@ -98,7 +122,15 @@
           placeholder={config.email.imap_pass_set ? 'Stored. Empty keeps it.' : undefined}
           bind:value={() => config.email.imap_pass ?? '', setPass}
         />
-        <Field label="IMAP domain" bind:value={config.email.imap_domain} />
+        <div class="sm:col-span-2 lg:col-span-4">
+          <TextArea
+            label="IMAP domains"
+            hint="One domain per line. Each account takes one at random."
+            rows={3}
+            spellcheck={false}
+            bind:value={getDomains, setDomains}
+          />
+        </div>
       </div>
       <MailboxCheck email={config.email} {fetch} />
     </div>

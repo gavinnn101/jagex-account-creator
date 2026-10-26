@@ -53,13 +53,16 @@ export function failureText(counts: RunCounts): string {
     .join(', ');
 }
 
-// A section of the config is an object. Each other value is a scalar.
+// A section of the config is an object. A list is one value, its items joined. Each other value is a scalar.
 function entries(prefix: string, values: Values): [string, string][] {
-  return Object.entries(values).flatMap(([key, value]): [string, string][] =>
-    value instanceof Object
+  return Object.entries(values).flatMap(([key, value]): [string, string][] => {
+    if (Array.isArray(value)) {
+      return [[prefix + key, value.join(', ')]];
+    }
+    return value instanceof Object
       ? entries(`${prefix}${key}.`, value as Values)
-      : [[prefix + key, String(value)]],
-  );
+      : [[prefix + key, String(value)]];
+  });
 }
 
 /**

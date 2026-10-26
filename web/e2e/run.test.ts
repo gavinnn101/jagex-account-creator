@@ -157,11 +157,14 @@ function shownTerms(scope: Locator): Promise<string[][]> {
   );
 }
 
-// Each value of the config under its dotted key, the key of the config file.
+// Each value of the config under its dotted key, the key of the config file. A list is one value.
 function dotted(values: object, prefix = ''): string[][] {
-  return Object.entries(values).flatMap(([key, value]: [string, unknown]) =>
-    value instanceof Object ? dotted(value, `${prefix}${key}.`) : [[prefix + key, String(value)]],
-  );
+  return Object.entries(values).flatMap(([key, value]: [string, unknown]) => {
+    if (Array.isArray(value)) return [[prefix + key, value.join(', ')]];
+    return value instanceof Object
+      ? dotted(value, `${prefix}${key}.`)
+      : [[prefix + key, String(value)]];
+  });
 }
 
 test('the form shows the saved config', async ({ page, request }) => {
@@ -175,7 +178,7 @@ test('the form shows the saved config', async ({ page, request }) => {
     'IMAP port': String(config.email.imap_port),
     'IMAP user': config.email.imap_user,
     'IMAP password': '',
-    'IMAP domain': config.email.imap_domain,
+    'IMAP domains': config.email.imap_domains.join('\n'),
     'Password length': String(config.account.password_length),
     'Account count': String(config.concurrency.account_count),
     'Max workers': String(config.concurrency.max_workers),
@@ -232,7 +235,7 @@ test('a start with every mailbox field set runs', async ({ page }) => {
   await form.getByLabel('IMAP port', { exact: true }).fill(String(mailboxPort));
   await form.getByLabel('IMAP user', { exact: true }).fill('e2e');
   await form.getByLabel('IMAP password', { exact: true }).fill('e2e-password');
-  await form.getByLabel('IMAP domain', { exact: true }).fill('example.com');
+  await form.getByLabel('IMAP domains', { exact: true }).fill('example.com');
 
   const answer = await clickStart(page, start);
   expect(answer.status()).toBe(202);
@@ -345,7 +348,7 @@ const savedEmail: Record<string, string> = {
   'IMAP host': 'imap.example.com',
   'IMAP port': '993',
   'IMAP user': 'e2e-saved',
-  'IMAP domain': 'saved.example.com',
+  'IMAP domains': 'saved.example.com\nsaved.example.org',
 };
 
 test('Save stores the config, and a reload shows it', async ({ page, request }) => {
@@ -375,7 +378,7 @@ test('Save stores the config, and a reload shows it', async ({ page, request }) 
     imap_port: 993,
     imap_user: 'e2e-saved',
     imap_pass_set: true,
-    imap_domain: 'saved.example.com',
+    imap_domains: ['saved.example.com', 'saved.example.org'],
   });
 
   await page.reload();

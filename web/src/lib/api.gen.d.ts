@@ -555,7 +555,8 @@ export interface components {
             imap_pass?: string;
             /** @description True when the config of serve, as read at start or last saved, holds an IMAP password. A request ignores it. */
             readonly imap_pass_set?: boolean;
-            imap_domain: string;
+            /** @description The domains of the new addresses. Each attempt takes one at random. */
+            imap_domains: string[];
         };
         AccountConfig: {
             password_length: number;

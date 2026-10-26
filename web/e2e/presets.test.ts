@@ -14,7 +14,7 @@ const valid: Record<string, string> = {
   'IMAP host': 'imap.presets.example',
   'IMAP port': '993',
   'IMAP user': 'e2e-presets',
-  'IMAP domain': 'presets.example',
+  'IMAP domains': 'presets.example\nmore.presets.example',
   'Max browsers': '2',
 };
 
@@ -43,7 +43,7 @@ function fieldsOf(config: Config): Record<string, string | boolean> {
     'IMAP port': String(config.email.imap_port),
     'IMAP user': config.email.imap_user,
     'IMAP password': '',
-    'IMAP domain': config.email.imap_domain,
+    'IMAP domains': config.email.imap_domains.join('\n'),
     'Password length': String(config.account.password_length),
     'Enable TOTP': config.account.enable_totp,
     'Account count': String(config.concurrency.account_count),

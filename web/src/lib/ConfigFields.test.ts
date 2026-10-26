@@ -82,7 +82,7 @@ describe('ConfigFields', () => {
       ['IMAP port', 993],
       ['IMAP user', 'user@example.com'],
       ['IMAP password', ''],
-      ['IMAP domain', 'example.com'],
+      ['IMAP domains', 'example.com'],
       ['Password length', 16],
       ['Chrome timeout', '30s'],
       ['Database', 'creator.db'],
@@ -102,6 +102,7 @@ describe('ConfigFields', () => {
     const { screen } = await renderFields(saved(false));
     const descriptions: [string, string][] = [
       ['Account count', '-1: no limit.'],
+      ['IMAP domains', 'One domain per line. Each account takes one at random.'],
       [
         'Account timeout',
         'A Go duration, for example 1m. It bounds each attempt up to the password POST.',
@@ -133,7 +134,7 @@ describe('ConfigFields', () => {
       ['IMAP host', 'imap.example.org'],
       ['IMAP port', '143'],
       ['IMAP user', 'other@example.org'],
-      ['IMAP domain', 'example.org'],
+      ['IMAP domains', 'example.org'],
       ['Password length', '20'],
       ['Chrome timeout', '45s'],
     ];
@@ -153,7 +154,7 @@ describe('ConfigFields', () => {
         imap_port: 143,
         imap_user: 'other@example.org',
         imap_pass_set: false,
-        imap_domain: 'example.org',
+        imap_domains: ['example.org'],
       },
       account: { password_length: 20, enable_totp: false },
       concurrency: { max_workers: 3, max_browsers: 0, account_count: -1, account_timeout: '2m' },
@@ -201,6 +202,41 @@ describe('ConfigFields', () => {
     await pass.fill('');
     await expect.element(pass).toHaveValue('');
     expect('imap_pass' in config.email).toBe(false);
+  });
+
+  it('sets the domains from the typed lines', async () => {
+    const { screen, config } = await renderFields(saved(false));
+    await openAll(screen);
+    const domains = screen.getByLabelText('IMAP domains');
+    await expect.element(domains).toHaveAttribute('spellcheck', 'false');
+    await domains.fill('a.example\nb.example');
+    await expect.element(domains).toHaveValue('a.example\nb.example');
+    expect(config.email.imap_domains).toEqual(['a.example', 'b.example']);
+  });
+
+  it('drops a blank line and the spaces around a domain', async () => {
+    const { screen, config } = await renderFields(saved(false));
+    await openAll(screen);
+    await screen.getByLabelText('IMAP domains').fill(' a.example \n\n   \n\tb.example  ');
+    expect(config.email.imap_domains).toEqual(['a.example', 'b.example']);
+  });
+
+  it('keeps a typed trailing newline in the text', async () => {
+    const { screen, config } = await renderFields(saved(false));
+    await openAll(screen);
+    const domains = screen.getByLabelText('IMAP domains');
+    await domains.fill('a.example\nb.example\n');
+    await expect.element(domains).toHaveValue('a.example\nb.example\n');
+    expect(config.email.imap_domains).toEqual(['a.example', 'b.example']);
+  });
+
+  it('shows a list that changes from outside, as a preset Load does', async () => {
+    const { screen, config } = await renderFields(saved(false));
+    await openAll(screen);
+    const domains = screen.getByLabelText('IMAP domains');
+    await domains.fill('a.example\n');
+    config.email.imap_domains = ['c.example', 'd.example'];
+    await expect.element(domains).toHaveValue('c.example\nd.example');
   });
 
   it('checks the mailbox with the edited email section', async () => {

@@ -14,7 +14,7 @@ it('returns a new saved config with no stored password on each call', () => {
       imap_port: 993,
       imap_user: 'user@example.com',
       imap_pass_set: false,
-      imap_domain: 'example.com',
+      imap_domains: ['example.com'],
     },
     account: { password_length: 16, enable_totp: true },
     concurrency: { max_workers: 10, max_browsers: 10, account_count: 10, account_timeout: '1m' },
