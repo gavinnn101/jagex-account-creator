@@ -80,9 +80,10 @@ else
     # Limitation: the timeout still scales with host speed. A baseline under about 1s fails toward a false TIMED OUT.
     go run "$tool" unleash --timeout-coefficient 15 "${excludes[@]}" -o "$report" . 2>&1 | tee "$work/gremlins.log"
   )
-  # gremlins drops a mutant that it fails to apply from its results and still exits 0, so the report cannot show that mutant.
-  if grep -F 'failed to apply mutation' "$work/gremlins.log" >&2; then
-    echo "mutation gate: FAIL, gremlins failed to apply the mutants above, so no result holds them" >&2
+  # gremlins exits 0 after both errors. It drops a mutant that it fails to apply from its results.
+  # A failed restore leaves the copy of its worker mutated, so each later mutant of that worker gets a false status.
+  if grep -E 'failed to (apply|restore) mutation' "$work/gremlins.log" >&2; then
+    echo "mutation gate: FAIL, gremlins failed to apply or restore the mutants above, so the results are not whole" >&2
     exit 1
   fi
   # gremlins writes no report and logs this line when its result set is empty, for example for a file behind a non-Linux build tag.
