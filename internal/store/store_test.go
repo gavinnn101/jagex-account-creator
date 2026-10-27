@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -284,10 +285,12 @@ func TestSetUp_FailureChangesNothing(t *testing.T) {
 	}
 }
 
-// A stored config of version 4 holds one imap_domain. Version 5 holds it as the one item of imap_domains.
-func TestOpen_Version4MovesDomainIntoList(t *testing.T) {
-	dbPath, _ := migratedDB(t, 4)
-	const oldConfig = `{"database":"creator.db","email":{"imap_host":"mail.example.com","imap_domain":"example.com"}}`
+// migratedConfigs stores oldConfig as the config of one run and one preset of a
+// database at version, then opens it, so the later migrations run. It returns the
+// run config and the preset config, each with its database and its email section.
+func migratedConfigs(t *testing.T, version int, oldConfig string) map[string]map[string]any {
+	t.Helper()
+	dbPath, _ := migratedDB(t, version)
 	db, err := openDB(dbPath)
 	if err != nil {
 		t.Fatal(err)
@@ -314,6 +317,7 @@ func TestOpen_Version4MovesDomainIntoList(t *testing.T) {
 	if err != nil || len(presets) != 1 {
 		t.Fatalf("Presets = %+v, %v, want one preset", presets, err)
 	}
+	out := map[string]map[string]any{}
 	for name, config := range map[string]json.RawMessage{"run": run.Config, "preset": presets[0].Config} {
 		var got struct {
 			Database string         `json:"database"`
@@ -322,10 +326,60 @@ func TestOpen_Version4MovesDomainIntoList(t *testing.T) {
 		if err := json.Unmarshal(config, &got); err != nil {
 			t.Fatalf("%s config %s: %v", name, config, err)
 		}
-		want := map[string]any{"imap_host": "mail.example.com", "imap_domains": []any{"example.com"}}
-		if got.Database != "creator.db" || !reflect.DeepEqual(got.Email, want) {
-			t.Errorf("%s config = %s, want the database and the email section %v", name, config, want)
+		if got.Database != "creator.db" {
+			t.Errorf("%s config = %s, want the database creator.db", name, config)
 		}
+		out[name] = got.Email
+	}
+	return out
+}
+
+// passwordLogin returns the auth and the oauth2 section that version 6 gives a stored config with no auth.
+func passwordLogin() map[string]any {
+	return map[string]any{
+		"auth":   "password",
+		"oauth2": map[string]any{"client_id": "", "client_secret_set": false, "refresh_token_set": false, "token_url": ""},
+	}
+}
+
+// A stored config of version 4 holds one imap_domain. Version 5 holds it as the one item of imap_domains.
+func TestOpen_Version4MovesDomainIntoList(t *testing.T) {
+	got := migratedConfigs(t, 4, `{"database":"creator.db","email":{"imap_host":"mail.example.com","imap_domain":"example.com"}}`)
+	want := map[string]any{"imap_host": "mail.example.com", "imap_domains": []any{"example.com"}}
+	maps.Copy(want, passwordLogin())
+	for name, email := range got {
+		if !reflect.DeepEqual(email, want) {
+			t.Errorf("%s email = %v, want %v", name, email, want)
+		}
+	}
+}
+
+// A stored config of version 5 has no auth, so it logs in with a password. Version 6
+// gives it auth password and an empty oauth2 section. A config with an auth keeps it.
+func TestOpen_Version5AddsPasswordLogin(t *testing.T) {
+	tests := []struct {
+		name, email string
+		want        map[string]any
+	}{
+		{name: "no auth", email: `{"imap_host":"mail.example.com"}`, want: map[string]any{"imap_host": "mail.example.com"}},
+		{
+			name:  "oauth2 auth",
+			email: `{"imap_host":"mail.example.com","auth":"oauth2","oauth2":{"client_id":"c","token_url":"https://example.com/token"}}`,
+			want: map[string]any{"imap_host": "mail.example.com", "auth": "oauth2",
+				"oauth2": map[string]any{"client_id": "c", "token_url": "https://example.com/token"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, ok := tt.want["auth"]; !ok {
+				maps.Copy(tt.want, passwordLogin())
+			}
+			for name, email := range migratedConfigs(t, 5, `{"database":"creator.db","email":`+tt.email+`}`) {
+				if !reflect.DeepEqual(email, tt.want) {
+					t.Errorf("%s email = %v, want %v", name, email, tt.want)
+				}
+			}
+		})
 	}
 }
 

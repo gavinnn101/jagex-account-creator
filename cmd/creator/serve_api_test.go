@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -92,9 +93,10 @@ func TestGetConfig(t *testing.T) {
 			var got api.Config
 			decodeBody(t, w, http.StatusOK, &got)
 			want := api.Config{
-				Database:    "creator.db",
-				Chrome:      api.ChromeConfig{Headless: true, Timeout: "1m0s"},
-				Email:       api.EmailConfig{ImapHost: "mail.example.com", ImapPort: 993, ImapUser: "user", ImapDomains: []string{"example.com"}, ImapPassSet: new(pass != "")},
+				Database: "creator.db",
+				Chrome:   api.ChromeConfig{Headless: true, Timeout: "1m0s"},
+				Email: api.EmailConfig{ImapHost: "mail.example.com", ImapPort: 993, ImapUser: "user", ImapDomains: []string{"example.com"}, ImapPassSet: new(pass != ""),
+					Auth: api.EmailAuthPassword, Oauth2: api.OAuth2Config{ClientSecretSet: new(false), RefreshTokenSet: new(false)}},
 				Account:     api.AccountConfig{PasswordLength: 16, EnableTotp: true},
 				Concurrency: api.ConcurrencyConfig{MaxWorkers: 1, MaxBrowsers: 1, AccountCount: 1, AccountTimeout: "5m0s"},
 			}
@@ -103,6 +105,47 @@ func TestGetConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+// storedOAuth2Config returns the config that config.Read returns for a file whose
+// email section logs in with oauth2 and holds the client secret and the refresh token.
+func storedOAuth2Config(t *testing.T) *config.Config {
+	t.Helper()
+	content := "email:\n  imap_host: mail.example.com\n  imap_user: user\n  imap_domains:\n    - example.com\n  auth: oauth2\n" +
+		"  oauth2:\n    client_id: client\n    client_secret: stored-secret\n    refresh_token: stored-refresh\n" +
+		"    token_url: https://oauth2.example.com/token\n"
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func TestGetConfigOAuth2(t *testing.T) {
+	w := doAPI(t.Context(), newTestAPI(storedOAuth2Config(t)), "GET", "/api/config", "")
+
+	for _, secret := range []string{"stored-secret", "stored-refresh"} {
+		if strings.Contains(w.Body.String(), secret) {
+			t.Fatalf("the body holds %s: %s", secret, w.Body.String())
+		}
+	}
+	var got api.Config
+	decodeBody(t, w, http.StatusOK, &got)
+	want := api.EmailConfig{ImapHost: "mail.example.com", ImapPort: 993, ImapUser: "user", ImapDomains: []string{"example.com"}, ImapPassSet: new(false),
+		Auth: api.EmailAuthOAuth2, Oauth2: api.OAuth2Config{ClientId: "client", ClientSecretSet: new(true), RefreshTokenSet: new(true), TokenUrl: "https://oauth2.example.com/token"}}
+	if !reflect.DeepEqual(got.Email, want) {
+		t.Errorf("email of GET /api/config =\n%s\nwant\n%s", jsonOf(t, got.Email), jsonOf(t, want))
+	}
+}
+
+// postedOAuth2 sets auth oauth2 and posts a complete oauth2 section.
+func postedOAuth2(c *api.Config) {
+	c.Email.Auth = api.EmailAuthOAuth2
+	c.Email.Oauth2 = api.OAuth2Config{ClientId: "client", RefreshToken: new("posted-refresh"), TokenUrl: "https://oauth2.example.com/token"}
 }
 
 // postedConfig returns the body of GET /api/config for cfg, changed by edit.
@@ -146,6 +189,13 @@ func TestValidateConfig(t *testing.T) {
 			want: api.ValidationResult{Errors: []string{`database must be the database of serve, "creator.db", got ` + strconv.Quote(absDatabase)}}},
 		{name: "no default fills a zero value", storedPass: "stored", edit: func(c *api.Config) { c.Concurrency.MaxBrowsers = 0 },
 			want: api.ValidationResult{Errors: []string{"concurrency.max_browsers must be at least 1, got 0"}}},
+		{name: "oauth2 needs no imap_pass", edit: postedOAuth2, want: api.ValidationResult{Valid: true, Errors: []string{}}},
+		{name: "oauth2 with no refresh token stored or posted", edit: func(c *api.Config) {
+			postedOAuth2(c)
+			c.Email.Oauth2.RefreshToken, c.Email.Oauth2.RefreshTokenSet = nil, new(true)
+		}, want: api.ValidationResult{Errors: []string{"email.oauth2.refresh_token is required"}}},
+		{name: "an absent auth", storedPass: "stored", edit: func(c *api.Config) { c.Email.Auth = "" },
+			want: api.ValidationResult{Errors: []string{`email.auth must be "password" or "oauth2", got ""`}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -170,7 +220,7 @@ func TestValidateConfigBadRequest(t *testing.T) {
 		{"bad chrome.timeout", postedConfig(t, cfg, func(c *api.Config) { c.Chrome.Timeout = "soon" }), `chrome.timeout: time: invalid duration "soon"`, 400},
 		{"bad account_timeout", postedConfig(t, cfg, func(c *api.Config) { c.Concurrency.AccountTimeout = "" }), `concurrency.account_timeout: time: invalid duration ""`, 400},
 		{"not JSON", "{", "can't decode JSON body: ", 400},
-		{"a body over the bound", `{"database":"` + strings.Repeat("a", maxBodyBytes) + `"}`, "the body is larger than 65536 bytes", 413},
+		{"a body over the bound", `{"database":"` + strings.Repeat("a", maxBodyBytes) + `"}`, fmt.Sprintf("the body is larger than %d bytes", maxBodyBytes), 413},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -208,8 +258,36 @@ func TestCheckChrome(t *testing.T) {
 	})
 }
 
+// A posted mailbox takes the stored secrets of the mailbox with its address, wherever the list has it.
+func TestEmailFromAPIMailboxes(t *testing.T) {
+	storedBox := func(user, pass, token string) config.MailboxConfig {
+		return config.MailboxConfig{IMAPUser: user, IMAPPass: pass, Auth: config.AuthOAuth2,
+			OAuth2: config.OAuth2Config{ClientSecret: "secret-" + user, RefreshToken: token}}
+	}
+	stored := config.EmailConfig{Mailboxes: []config.MailboxConfig{
+		storedBox("a@outlook.com", "pass-a", "token-a"),
+		storedBox("b@outlook.com", "pass-b", "token-b"),
+		storedBox("c@outlook.com", "pass-c", "token-c"),
+	}}
+	posted := func(user string, token *string) api.MailboxConfig {
+		return api.MailboxConfig{ImapUser: user, Auth: api.MailboxConfigAuth(config.AuthOAuth2), Oauth2: api.OAuth2Config{RefreshToken: token}}
+	}
+	list := api.MailboxConfigList{posted("C@Outlook.com", nil), posted("a@outlook.com", nil), posted("d@outlook.com", new("token-d"))}
+
+	got := emailFromAPI(api.EmailConfig{Mailboxes: &list}, stored).Mailboxes
+
+	want := []config.MailboxConfig{
+		{IMAPUser: "C@Outlook.com", IMAPPass: "pass-c", Auth: config.AuthOAuth2, OAuth2: config.OAuth2Config{ClientSecret: "secret-c@outlook.com", RefreshToken: "token-c"}},
+		{IMAPUser: "a@outlook.com", IMAPPass: "pass-a", Auth: config.AuthOAuth2, OAuth2: config.OAuth2Config{ClientSecret: "secret-a@outlook.com", RefreshToken: "token-a"}},
+		{IMAPUser: "d@outlook.com", Auth: config.AuthOAuth2, OAuth2: config.OAuth2Config{RefreshToken: "token-d"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("mailboxes = %+v, want %+v", got, want)
+	}
+}
+
 func TestCheckMailbox(t *testing.T) {
-	const section = `{"imap_host":"posted.example.com","imap_port":143,"imap_user":"posted-user","imap_domains":["posted.example.com","other.example.com"]`
+	const section = `{"imap_host":"posted.example.com","imap_port":143,"imap_user":"posted-user","imap_domains":["posted.example.com","other.example.com"],"auth":"password"`
 	loginErr := errors.New("login refused")
 	tests := []struct {
 		name     string
@@ -237,7 +315,8 @@ func TestCheckMailbox(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("result = %+v, want %+v", got, tt.want)
 			}
-			wantEmail := config.EmailConfig{IMAPHost: "posted.example.com", IMAPPort: 143, IMAPUser: "posted-user", IMAPPass: tt.wantPass, IMAPDomains: []string{"posted.example.com", "other.example.com"}}
+			wantEmail := config.EmailConfig{IMAPHost: "posted.example.com", IMAPPort: 143, IMAPUser: "posted-user", IMAPPass: tt.wantPass, IMAPDomains: []string{"posted.example.com", "other.example.com"},
+				Auth: config.AuthPassword}
 			if gotCfg == nil || !reflect.DeepEqual(gotCfg.Email, wantEmail) || gotCfg.Database != cfg.Database {
 				t.Fatalf("the login got %+v, want the stored config with the email section %+v", gotCfg, wantEmail)
 			}
@@ -246,6 +325,74 @@ func TestCheckMailbox(t *testing.T) {
 			}
 		})
 	}
+	t.Run("an absent oauth2 secret takes the stored one", func(t *testing.T) {
+		var gotCfg *config.Config
+		s := &apiServer{cfg: storedOAuth2Config(t), logger: logtest.New(io.Discard), checkLoginFn: func(_ context.Context, c *config.Config) error {
+			gotCfg = c
+			return nil
+		}}
+		body := `{"imap_host":"mail.example.com","imap_port":993,"imap_user":"user","imap_domains":["example.com"],"auth":"oauth2",` +
+			`"oauth2":{"client_id":"posted-client","refresh_token":"posted-refresh","token_url":"https://oauth2.example.com/token"}}`
+
+		var got api.MailboxCheck
+		decodeBody(t, doAPI(t.Context(), s.handler(), "POST", "/api/checks/mailbox", body), http.StatusOK, &got)
+
+		want := config.OAuth2Config{ClientID: "posted-client", ClientSecret: "stored-secret", RefreshToken: "posted-refresh", TokenURL: "https://oauth2.example.com/token"}
+		if !got.Ok || gotCfg == nil || gotCfg.Email.Auth != config.AuthOAuth2 || gotCfg.Email.OAuth2 != want {
+			t.Errorf("result = %+v, the login got %+v, want ok and the oauth2 section %+v", got, gotCfg, want)
+		}
+	})
+	t.Run("a mailboxes list checks each mailbox in place of the section", func(t *testing.T) {
+		var mu sync.Mutex
+		var gotEmails []config.EmailConfig
+		s := &apiServer{cfg: storedConfig(t, "stored"), logger: logtest.New(io.Discard), checkLoginFn: func(_ context.Context, c *config.Config) error {
+			mu.Lock()
+			defer mu.Unlock()
+			gotEmails = append(gotEmails, c.Email)
+			if c.Email.IMAPUser == "b@outlook.com" {
+				return loginErr
+			}
+			return nil
+		}}
+		mailbox := func(user string) string {
+			return `{"imap_host":"outlook.office365.com","imap_port":993,"imap_user":"` + user + `","imap_domains":[],"auth":"oauth2",` +
+				`"oauth2":{"client_id":"client","refresh_token":"refresh-` + user + `","token_url":"https://oauth2.example.com/token"}}`
+		}
+		body := section + `,"mailboxes":[` + mailbox("a@outlook.com") + "," + mailbox("b@outlook.com") + "," + mailbox("c@outlook.com") + "]}"
+
+		var got api.MailboxCheck
+		decodeBody(t, doAPI(t.Context(), s.handler(), "POST", "/api/checks/mailbox", body), http.StatusOK, &got)
+
+		want := api.MailboxCheck{Error: new("1 of 3 mailboxes failed the login"), Mailboxes: &[]api.MailboxLogin{
+			{ImapUser: "a@outlook.com", Ok: true},
+			{ImapUser: "b@outlook.com", Error: new("login refused")},
+			{ImapUser: "c@outlook.com", Ok: true},
+		}}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("result = %+v, want %+v", got, want)
+		}
+		slices.SortFunc(gotEmails, func(a, b config.EmailConfig) int { return strings.Compare(a.IMAPUser, b.IMAPUser) })
+		users := []string{"a@outlook.com", "b@outlook.com", "c@outlook.com"}
+		wantEmails := make([]config.EmailConfig, 0, len(users))
+		for _, user := range users {
+			wantEmails = append(wantEmails, config.EmailConfig{IMAPHost: "outlook.office365.com", IMAPPort: 993, IMAPUser: user, IMAPDomains: []string{}, Auth: config.AuthOAuth2,
+				OAuth2: config.OAuth2Config{ClientID: "client", RefreshToken: "refresh-" + user, TokenURL: "https://oauth2.example.com/token"}})
+		}
+		if !reflect.DeepEqual(gotEmails, wantEmails) {
+			t.Errorf("the logins got %+v, want one email section for each mailbox, %+v", gotEmails, wantEmails)
+		}
+	})
+	t.Run("a mailboxes list whose every login succeeds", func(t *testing.T) {
+		s := &apiServer{cfg: storedConfig(t, "stored"), logger: logtest.New(io.Discard), checkLoginFn: func(context.Context, *config.Config) error { return nil }}
+		body := section + `,"mailboxes":[{"imap_host":"h","imap_port":993,"imap_user":"a@outlook.com","imap_domains":[],"auth":"password","oauth2":{"client_id":"","token_url":""}}]}`
+
+		var got api.MailboxCheck
+		decodeBody(t, doAPI(t.Context(), s.handler(), "POST", "/api/checks/mailbox", body), http.StatusOK, &got)
+
+		if want := (api.MailboxCheck{Ok: true, Mailboxes: &[]api.MailboxLogin{{ImapUser: "a@outlook.com", Ok: true}}}); !reflect.DeepEqual(got, want) {
+			t.Errorf("result = %+v, want %+v", got, want)
+		}
+	})
 	t.Run("the real login on an ended request", func(t *testing.T) {
 		ended, cancel := context.WithCancel(t.Context())
 		cancel()
@@ -298,8 +445,27 @@ func fillConfig(v reflect.Value) {
 			f.SetInt(int64(i + 1))
 		case f.Kind() == reflect.Bool:
 			f.SetBool(true)
-		case f.Type() == reflect.TypeFor[[]string]():
-			f.Set(reflect.ValueOf([]string{v.Type().Field(i).Name, "second"}))
+		case f.Kind() == reflect.Slice, f.Kind() == reflect.Array:
+			elType := f.Type().Elem()
+			switch elType.Kind() {
+			case reflect.String:
+				slice := reflect.MakeSlice(f.Type(), 1, 1)
+				slice.Index(0).SetString(v.Type().Field(i).Name)
+				f.Set(slice)
+			default:
+				slice := reflect.MakeSlice(f.Type(), 1, 1)
+				zero := reflect.New(elType).Elem()
+				switch zero.Kind() {
+				case reflect.Pointer:
+					zero.Set(reflect.New(elType.Elem()))
+				case reflect.Struct:
+					fillConfig(zero)
+				default:
+					zero.Set(reflect.Zero(elType))
+				}
+				slice.Index(0).Set(zero)
+				f.Set(slice)
+			}
 		default:
 			f.SetString(v.Type().Field(i).Name)
 		}
@@ -322,7 +488,7 @@ func TestAPIConfigRoundTrip(t *testing.T) {
 	var cfg config.Config
 	fillConfig(reflect.ValueOf(&cfg).Elem())
 
-	got, err := configFromAPI(apiConfig(&cfg), cfg.Email.IMAPPass)
+	got, err := configFromAPI(apiConfig(&cfg), cfg.Email)
 
 	if err != nil || !reflect.DeepEqual(got, &cfg) {
 		t.Errorf("configFromAPI(apiConfig(cfg)) = %+v, %v, want %+v", got, err, cfg)
@@ -350,8 +516,8 @@ func tagPaths(t reflect.Type, key, prefix string) map[string]bool {
 // The config file and the API Config spell one key set in two homes. This
 // detector fails on a key in one home and not in the other.
 func TestAPIConfigMatchesConfig(t *testing.T) {
-	// The API holds imap_pass_set in addition, in place of the stored password.
-	apiOnly := map[string]bool{"email.imap_pass_set": true}
+	// The API holds the set flags in addition, in place of the stored secrets.
+	apiOnly := map[string]bool{"email.imap_pass_set": true, "email.oauth2.client_secret_set": true, "email.oauth2.refresh_token_set": true}
 	yamlKeys := tagPaths(reflect.TypeFor[config.Config](), "yaml", "")
 	jsonKeys := tagPaths(reflect.TypeFor[api.Config](), "json", "")
 	for _, k := range slices.Sorted(maps.Keys(yamlKeys)) {
@@ -405,7 +571,7 @@ func TestSaveConfig(t *testing.T) {
 			posted := apiConfig(s.config())
 			tt.edit(&posted)
 			// The password comes from the row, so the test does not trust the handler's choice.
-			want, err := configFromAPI(posted, tt.wantPass)
+			want, err := configFromAPI(posted, config.EmailConfig{IMAPPass: tt.wantPass})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -227,6 +227,24 @@ func TestAccount_NotFound(t *testing.T) {
 	}
 }
 
+func TestAccountByEmail(t *testing.T) {
+	s := mustOpen(t)
+	writeFixture(t, s)
+	for _, tt := range []struct{ email string }{{"a@example.com"}, {"A@Example.COM"}, {"c%_d@example.com"}} {
+		got, err := s.AccountByEmail(t.Context(), tt.email)
+		if err != nil || !strings.EqualFold(got.Account.Email, tt.email) {
+			t.Errorf("AccountByEmail(%q) = %+v, %v, want the account of that email", tt.email, got, err)
+		}
+	}
+	// The match is equality, so the % and _ of a LIKE pattern match only themselves.
+	for _, email := range []string{"c__d@example.com", "zzz@example.com", ""} {
+		_, err := s.AccountByEmail(t.Context(), email)
+		if want := "reading the account of " + email + ": not found"; !errors.Is(err, ErrNotFound) || err.Error() != want {
+			t.Errorf("AccountByEmail(%q) error = %v, want %s", email, err, want)
+		}
+	}
+}
+
 func TestConfirmAccount(t *testing.T) {
 	s := mustOpen(t)
 	writeFixture(t, s)
@@ -291,6 +309,7 @@ type accountRead struct {
 func accountReads() []accountRead {
 	return []accountRead{
 		{name: "Account", read: func(ctx context.Context, s *Store) error { _, err := s.Account(ctx, 1); return err }},
+		{name: "AccountByEmail", read: func(ctx context.Context, s *Store) error { _, err := s.AccountByEmail(ctx, "a@b.com"); return err }},
 		{name: "Accounts", read: func(ctx context.Context, s *Store) error {
 			_, err := s.Accounts(ctx, AccountFilter{}, 0, 10)
 			return err
@@ -328,7 +347,7 @@ func TestAccountReads_AfterClose(t *testing.T) {
 	for _, r := range accountReads() {
 		t.Run(r.name, func(t *testing.T) {
 			want := "reading accounts: sql: database is closed"
-			if r.name == "Account" {
+			if r.name == "Account" || r.name == "AccountByEmail" {
 				want = "reading account: sql: database is closed"
 			}
 			if err := r.read(t.Context(), s); err == nil || err.Error() != want {

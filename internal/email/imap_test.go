@@ -20,9 +20,29 @@ import (
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
+	"golang.org/x/oauth2"
 
 	"jagex_account_creator/internal/logtest"
 )
+
+func TestIMAPProvider_Address(t *testing.T) {
+	p := &IMAPProvider{User: "user@example.org"}
+	if got, want := p.Address(), "user@example.org"; got != want {
+		t.Errorf("Address with no domains = %q, want the user %q", got, want)
+	}
+	p.Domains = []string{"example.com", "example.net"}
+	seen := map[string]bool{}
+	for range 64 {
+		local, domain, ok := strings.Cut(p.Address(), "@")
+		if !ok || len(local) != 12 || !slices.Contains(p.Domains, domain) {
+			t.Fatalf("Address = %s@%s, want a 12-character local part at one of %q", local, domain, p.Domains)
+		}
+		seen[domain] = true
+	}
+	if len(seen) != 2 {
+		t.Errorf("64 addresses took the domains %v, want both of %q", seen, p.Domains)
+	}
+}
 
 func TestIMAPProvider_PollInterval(t *testing.T) {
 	tests := []struct {
@@ -177,6 +197,8 @@ type connCase struct {
 	name         string
 	greeting     string
 	serve        serveFunc
+	session      func() serveFunc   // when set, gives each connection its own handler in place of serve
+	tokens       oauth2.TokenSource // the provider's TokenSource
 	fails        int
 	wantErr      string
 	wantLogin    bool
@@ -190,8 +212,11 @@ func runConnCase(t *testing.T, tt connCase, call func(ctx context.Context, p *IM
 	t.Helper()
 	synctest.Test(t, func(t *testing.T) {
 		d := dialerFor(tt.greeting, tt.serve)
+		if tt.session != nil {
+			d.session = tt.session
+		}
 		d.fails = tt.fails
-		p := &IMAPProvider{Logger: discardLogger(), dialFn: d.dial}
+		p := &IMAPProvider{User: xoauth2User, TokenSource: tt.tokens, Logger: discardLogger(), dialFn: d.dial}
 		start := time.Now()
 		err := call(t.Context(), p)
 		elapsed := time.Since(start)
@@ -303,6 +328,130 @@ func TestIMAPProvider_ConnectClose(t *testing.T) {
 			})
 		})
 	}
+}
+
+const (
+	xoauth2User  = "imap@example.com"
+	xoauth2Token = "good-token"
+	// xoauth2IR is the initial response of xoauth2User with xoauth2Token, in base64 as the client sends it.
+	xoauth2IR = "dXNlcj1pbWFwQGV4YW1wbGUuY29tAWF1dGg9QmVhcmVyIGdvb2QtdG9rZW4BAQ=="
+	// xoauth2Challenge is the base64 JSON error that Gmail sends for a bad token.
+	xoauth2Challenge = "eyJzdGF0dXMiOiI0MDAiLCJzY2hlbWVzIjoiQmVhcmVyIiwic2NvcGUiOiJodHRwczovL21haWwuZ29vZ2xlLmNvbS8ifQ=="
+)
+
+// tokenSourceFunc is an oauth2.TokenSource that calls itself.
+type tokenSourceFunc func() (*oauth2.Token, error)
+
+func (f tokenSourceFunc) Token() (*oauth2.Token, error) { return f() }
+
+// staticToken returns a TokenSource of the access token token.
+func staticToken(token string) tokenSourceFunc {
+	return func() (*oauth2.Token, error) { return &oauth2.Token{AccessToken: token}, nil }
+}
+
+// xoauth2Session serves AUTHENTICATE XOAUTH2 as Gmail does. It accepts the initial response
+// xoauth2IR, and answers any other with the error challenge and then NO. When the client
+// sends no initial response on the command line, it asks for it with an empty continuation.
+// It answers every other command with OK.
+func xoauth2Session() serveFunc {
+	var authTag string // the tag of the AUTHENTICATE that waits for a client line
+	var challenged bool
+	answer := func(w io.Writer, ir string) {
+		if ir == xoauth2IR {
+			_, _ = fmt.Fprintf(w, "%s OK [CAPABILITY %s] authenticated\r\n", authTag, idleCaps)
+			authTag = ""
+			return
+		}
+		challenged = true
+		_, _ = fmt.Fprintf(w, "+ %s\r\n", xoauth2Challenge)
+	}
+	return func(w io.Writer, line string) {
+		switch {
+		case authTag != "" && challenged:
+			if line != "" {
+				_, _ = fmt.Fprintf(w, "%s BAD want an empty response to the challenge\r\n", authTag)
+			} else {
+				_, _ = fmt.Fprintf(w, "%s NO Invalid credentials\r\n", authTag)
+			}
+			authTag, challenged = "", false
+		case authTag != "":
+			answer(w, line)
+		default:
+			fields := strings.Fields(line)
+			if len(fields) < 3 || fields[1] != "AUTHENTICATE" {
+				okIdle(w, line)
+				return
+			}
+			authTag = fields[0]
+			if fields[2] != "XOAUTH2" {
+				_, _ = fmt.Fprintf(w, "%s NO unsupported mechanism\r\n", authTag)
+				authTag = ""
+				return
+			}
+			if len(fields) < 4 {
+				_, _ = io.WriteString(w, "+ \r\n")
+				return
+			}
+			answer(w, fields[3])
+		}
+	}
+}
+
+func TestIMAPProvider_XOAUTH2(t *testing.T) {
+	saslIRGreeting := "* OK [CAPABILITY " + idleCaps + " SASL-IR AUTH=XOAUTH2] ready"
+	noIRGreeting := "* OK [CAPABILITY " + idleCaps + " AUTH=XOAUTH2] ready"
+	tokenErr := func(err error) oauth2.TokenSource {
+		return tokenSourceFunc(func() (*oauth2.Token, error) { return nil, err })
+	}
+	tests := []connCase{
+		{name: "initial response on the command line", greeting: saslIRGreeting, session: xoauth2Session,
+			tokens: staticToken(xoauth2Token), wantCommands: []string{"AUTHENTICATE", "LOGOUT"}},
+		{name: "initial response after a continuation", greeting: noIRGreeting, session: xoauth2Session,
+			tokens: staticToken(xoauth2Token), wantCommands: []string{"AUTHENTICATE", xoauth2IR, "LOGOUT"}},
+		{name: "server refuses the token", greeting: saslIRGreeting, session: xoauth2Session,
+			tokens: staticToken("expired-token"), wantErr: "IMAP login failed: Invalid credentials", wantLogin: true,
+			wantCommands: []string{"AUTHENTICATE", ""}},
+		{name: "refresh token revoked", serve: okIdle,
+			tokens:  tokenErr(&oauth2.RetrieveError{ErrorCode: "invalid_grant"}),
+			wantErr: `IMAP login failed: getting OAuth2 token: oauth2: "invalid_grant"`, wantLogin: true,
+			wantCommands: []string{}},
+		{name: "token endpoint unreachable", serve: okIdle,
+			tokens:       tokenErr(errors.New("dial tcp: connection refused")),
+			wantErr:      "getting OAuth2 token: dial tcp: connection refused",
+			wantCommands: []string{}},
+		{name: "token endpoint server error", serve: okIdle,
+			tokens:       tokenErr(&oauth2.RetrieveError{ErrorCode: "server_error"}),
+			wantErr:      `getting OAuth2 token: oauth2: "server_error"`,
+			wantCommands: []string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runConnCase(t, tt, func(ctx context.Context, p *IMAPProvider) error { return p.CheckLogin(ctx) })
+		})
+	}
+}
+
+// TestIMAPProvider_XOAUTH2_TokenPerConnection checks that each connection asks the
+// TokenSource for a token, so a refreshed token reaches the next login.
+func TestIMAPProvider_XOAUTH2_TokenPerConnection(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		d := &fakeDialer{greeting: "* OK [CAPABILITY " + idleCaps + " SASL-IR AUTH=XOAUTH2] ready", session: xoauth2Session}
+		var calls int
+		p := &IMAPProvider{User: xoauth2User, Logger: discardLogger(), dialFn: d.dial,
+			TokenSource: tokenSourceFunc(func() (*oauth2.Token, error) {
+				calls++
+				return &oauth2.Token{AccessToken: xoauth2Token}, nil
+			})}
+		for range 2 {
+			if err := p.CheckLogin(t.Context()); err != nil {
+				t.Fatalf("CheckLogin: %v", err)
+			}
+		}
+		if calls != 2 {
+			t.Errorf("Token called %d times, want 2", calls)
+		}
+		d.assertClosed(t)
+	})
 }
 
 // pipeClient returns a logged-in client over an in-process pipe. Its server greets with caps

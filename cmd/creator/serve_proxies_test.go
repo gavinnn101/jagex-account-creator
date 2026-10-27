@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -144,7 +145,7 @@ func TestImportProxiesAPI(t *testing.T) {
 	})
 	t.Run("a body over the bound", func(t *testing.T) {
 		assertAPIError(t, doAPI(t.Context(), s.handler(), "POST", "/api/proxies/import", strings.Repeat("#", maxBodyBytes+1)),
-			http.StatusRequestEntityTooLarge, "the body is larger than 65536 bytes")
+			http.StatusRequestEntityTooLarge, fmt.Sprintf("the body is larger than %d bytes", maxBodyBytes))
 	})
 }
 

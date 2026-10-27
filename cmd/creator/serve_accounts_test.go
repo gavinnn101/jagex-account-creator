@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -331,6 +332,35 @@ func TestExportAccounts(t *testing.T) {
 }
 
 // A store error answers 500 with the JSON error and logs one ERROR line. The export sends no part of a file.
+func TestLookupAccounts(t *testing.T) {
+	s := newServeAPI(io.Discard)
+	s.store = newTestStore(t)
+	seedAccounts(t, s.store)
+
+	var got api.AccountLookupResult
+	body := `{"emails":["new@example.com","C@Example.com","a@example.com","c@example.com"]}`
+	decodeBody(t, doAPI(t.Context(), s.handler(), "POST", "/api/accounts/lookup", body), http.StatusOK, &got)
+
+	want := []api.AccountMatch{{Email: "C@Example.com", Id: 3}, {Email: "a@example.com", Id: 1}, {Email: "c@example.com", Id: 3}}
+	if !reflect.DeepEqual(got.Accounts, want) {
+		t.Errorf("accounts = %+v, want %+v", got.Accounts, want)
+	}
+
+	t.Run("no email with an account gives an empty list", func(t *testing.T) {
+		w := doAPI(t.Context(), s.handler(), "POST", "/api/accounts/lookup", `{"emails":["new@example.com"]}`)
+		if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"accounts":[]}` {
+			t.Errorf("answer = %d %s, want 200 with an empty list", w.Code, w.Body.String())
+		}
+	})
+	t.Run("a closed store answers 500", func(t *testing.T) {
+		closed := newServeAPI(io.Discard)
+		closed.store = newTestStore(t)
+		_ = closed.store.Close()
+		assertAPIError(t, doAPI(t.Context(), closed.handler(), "POST", "/api/accounts/lookup", `{"emails":["a@example.com"]}`),
+			http.StatusInternalServerError, "reading account: ")
+	})
+}
+
 func TestAccountsStoreErrors(t *testing.T) {
 	const closed = "sql: database is closed"
 	for _, tt := range []struct{ name, method, target, want string }{

@@ -13,12 +13,12 @@ export interface paths {
         };
         /**
          * The effective config of serve mode
-         * @description The config of serve, as read at start or last saved, with the defaults. The IMAP password never appears. imap_pass_set tells whether the config holds one.
+         * @description The config of serve, as read at start or last saved, with the defaults. No email secret appears: not the IMAP password, the OAuth2 client secret or the refresh token. imap_pass_set, client_secret_set and refresh_token_set tell whether the config holds each one.
          */
         get: operations["getConfig"];
         /**
          * Save the config of serve to the config file
-         * @description Checks the posted config as a run start checks its config. A valid config becomes the config of serve, and the server writes it to the config file. The file keeps its comments. An absent imap_pass means the password of the config of serve, as read at start or last saved.
+         * @description Checks the posted config as a run start checks its config. A valid config becomes the config of serve, and the server writes it to the config file. The file keeps its comments. An absent imap_pass, client_secret or refresh_token means the one of the config of serve, as read at start or last saved.
          */
         put: operations["saveConfig"];
         post?: never;
@@ -39,7 +39,7 @@ export interface paths {
         put?: never;
         /**
          * Validate a config
-         * @description Checks the posted config as a run start checks its config. The server fills no default, so the post holds every value. An absent imap_pass means the password of the config of serve, as read at start or last saved.
+         * @description Checks the posted config as a run start checks its config. The server fills no default, so the post holds every value. An absent imap_pass, client_secret or refresh_token means the one of the config of serve, as read at start or last saved.
          */
         post: operations["validateConfig"];
         delete?: never;
@@ -76,7 +76,7 @@ export interface paths {
         put?: never;
         /**
          * Log in to the mailbox of an email section
-         * @description Connects to the IMAP server of the posted email section, logs in and logs out. An absent imap_pass means the password of the config of serve, as read at start or last saved.
+         * @description Connects to the IMAP server of the posted email section, logs in and logs out. With auth oauth2, it first gets an access token from the token endpoint. An absent imap_pass, client_secret or refresh_token means the one of the config of serve, as read at start or last saved. With a mailboxes list, it logs in to each mailbox of the list in place of the section, 8 at a time, and answers the login of each.
          */
         post: operations["checkMailbox"];
         delete?: never;
@@ -97,7 +97,7 @@ export interface paths {
         put?: never;
         /**
          * Start a run with a config
-         * @description Validates the posted config and starts a run with it. An absent imap_pass means the password of the config of serve, as read at start or last saved. Serve runs one run at a time.
+         * @description Validates the posted config and starts a run with it. An absent imap_pass, client_secret or refresh_token means the one of the config of serve, as read at start or last saved. Serve runs one run at a time.
          */
         post: operations["startRun"];
         delete?: never;
@@ -320,6 +320,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/accounts/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The saved accounts of a list of emails
+         * @description Returns the id of the saved account of each posted email that has one, in the order of the emails. The match ignores the case of ASCII letters. An email with no account has no item. The paste box of the mailboxes uses it, because a mailbox with no imap_domains makes one account, and a run skips a mailbox whose address has one.
+         */
+        post: operations["lookupAccounts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/accounts/export": {
         parameters: {
             query?: never;
@@ -489,13 +509,13 @@ export interface paths {
         };
         /**
          * Every run preset of the store, in name order
-         * @description The list has no paging. The name order ignores the case of ASCII letters. A preset holds no IMAP password. In the config of each preset, database and email.imap_pass_set are the values of the config of serve, as read at start or last saved.
+         * @description The list has no paging. The name order ignores the case of ASCII letters. A preset holds no email secret. In the config of each preset, database, email.imap_pass_set, email.oauth2.client_secret_set and email.oauth2.refresh_token_set are the values of the config of serve, as read at start or last saved.
          */
         get: operations["listPresets"];
         put?: never;
         /**
          * Save a run preset under its name
-         * @description Checks the posted config as a run start checks its config. The server removes the spaces at the start and the end of the name. A preset with the same name gets the new config and keeps its id. An absent imap_pass means the password of the config of serve, as read at start or last saved. The preset holds no IMAP password.
+         * @description Checks the posted config as a run start checks its config. The server removes the spaces at the start and the end of the name. A preset with the same name gets the new config and keeps its id. An absent imap_pass, client_secret or refresh_token means the one of the config of serve, as read at start or last saved. The preset holds no email secret.
          */
         post: operations["savePreset"];
         delete?: never;
@@ -555,8 +575,47 @@ export interface components {
             imap_pass?: string;
             /** @description True when the config of serve, as read at start or last saved, holds an IMAP password. A request ignores it. */
             readonly imap_pass_set?: boolean;
-            /** @description The domains of the new addresses. Each attempt takes one at random. */
+            /** @description The catch-all domains of the new addresses. Each attempt takes one at random. An empty list means the mailbox makes one account, whose address is imap_user. */
             imap_domains: string[];
+            /**
+             * @description password logs in with imap_pass, oauth2 with XOAUTH2 and an access token from the refresh token of oauth2
+             * @enum {string}
+             */
+            auth: "password" | "oauth2";
+            oauth2: components["schemas"]["OAuth2Config"];
+            mailboxes?: components["schemas"]["MailboxConfigList"];
+        };
+        /** @description One mailbox of a run. The list replaces the mailbox of the email section. With no imap_domains, the mailbox makes one account, at imap_user. In a request, an absent secret takes the stored secret of the stored mailbox with the same imap_user. */
+        MailboxConfig: {
+            imap_host: string;
+            imap_port: number;
+            imap_user: string;
+            /** @description Absent in a response. In a request, absent means the stored password. */
+            imap_pass?: string;
+            /** @description True when the stored config holds an IMAP password for this mailbox. A request ignores it. */
+            readonly imap_pass_set?: boolean;
+            imap_domains: string[];
+            /**
+             * @description password logs in with imap_pass, oauth2 with XOAUTH2 and an access token from the refresh token of oauth2
+             * @enum {string}
+             */
+            auth: "password" | "oauth2";
+            oauth2: components["schemas"]["OAuth2Config"];
+        };
+        MailboxConfigList: components["schemas"]["MailboxConfig"][];
+        /** @description The refresh-token grant of an XOAUTH2 login. Only an email section whose auth is oauth2 uses it. */
+        OAuth2Config: {
+            client_id: string;
+            /** @description Absent in a response. In a request, absent means the stored client secret. Empty for a public client. */
+            client_secret?: string;
+            /** @description True when the config of serve, as read at start or last saved, holds a client secret. A request ignores it. */
+            readonly client_secret_set?: boolean;
+            /** @description Absent in a response. In a request, absent means the stored refresh token. */
+            refresh_token?: string;
+            /** @description True when the config of serve, as read at start or last saved, holds a refresh token. A request ignores it. */
+            readonly refresh_token_set?: boolean;
+            /** @description The token endpoint, for example https://oauth2.googleapis.com/token */
+            token_url: string;
         };
         AccountConfig: {
             password_length: number;
@@ -585,9 +644,32 @@ export interface components {
             mismatch?: boolean;
         };
         MailboxCheck: {
+            /** @description True when every login succeeded */
+            ok: boolean;
+            /** @description The error of the login. With a mailboxes list, the count of the failed logins */
+            error?: string;
+            /** @description The login of each mailbox of the mailboxes list, in list order. Absent for an email section with no list */
+            mailboxes?: components["schemas"]["MailboxLogin"][];
+        };
+        /** @description The login check of one mailbox of a mailboxes list */
+        MailboxLogin: {
+            imap_user: string;
             /** @description True when the login succeeded */
             ok: boolean;
             error?: string;
+        };
+        AccountLookup: {
+            emails: string[];
+        };
+        AccountLookupResult: {
+            accounts: components["schemas"]["AccountMatch"][];
+        };
+        /** @description A posted email and the id of its saved account */
+        AccountMatch: {
+            /** @description The email as posted */
+            email: string;
+            /** Format: int64 */
+            id: number;
         };
         /** @description The state of the current or last run of serve */
         RunState: {
@@ -997,7 +1079,7 @@ export interface components {
              * @description The time of the last save of the preset
              */
             saved_at: string;
-            /** @description The config of the preset. database and email.imap_pass_set are the values of the config of serve, not the saved values. */
+            /** @description The config of the preset. database, email.imap_pass_set, email.oauth2.client_secret_set and email.oauth2.refresh_token_set are the values of the config of serve, not the saved values. */
             config: components["schemas"]["Config"];
         };
         /** @description Every preset of the store, in name order */
@@ -1021,7 +1103,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The body is larger than 64 KiB */
+        /** @description The body is larger than 8 MiB */
         TooLarge: {
             headers: {
                 [name: string]: unknown;
@@ -1572,6 +1654,41 @@ export interface operations {
             400: components["responses"]["BadParameter"];
             404: components["responses"]["NotFound"];
             /** @description The server could not write or read the account. The message names the failed step. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    lookupAccounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountLookup"];
+            };
+        };
+        responses: {
+            /** @description The accounts of the emails */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLookupResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            413: components["responses"]["TooLarge"];
+            /** @description The server could not read the accounts. The message names the failed step. */
             500: {
                 headers: {
                     [name: string]: unknown;

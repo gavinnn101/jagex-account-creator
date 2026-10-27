@@ -379,6 +379,13 @@ test('Save stores the config, and a reload shows it', async ({ page, request }) 
     imap_user: 'e2e-saved',
     imap_pass_set: true,
     imap_domains: ['saved.example.com', 'saved.example.org'],
+    auth: 'password',
+    oauth2: {
+      client_id: '',
+      client_secret_set: false,
+      refresh_token_set: false,
+      token_url: '',
+    },
   });
 
   await page.reload();

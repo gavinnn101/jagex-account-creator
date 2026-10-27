@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -345,7 +346,7 @@ func TestLoadEmptyFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the required-field errors for an empty file")
 	}
-	for _, want := range []string{"invalid config", "imap_host", "imap_user", "imap_pass", "imap_domains"} {
+	for _, want := range []string{"invalid config", "imap_host", "imap_user", "imap_pass"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q, got: %v", want, err)
 		}
@@ -409,8 +410,9 @@ func TestValidateFields(t *testing.T) {
 		{"account_timeout negative", func(c *Config) { c.Concurrency.AccountTimeout = -1 * time.Second }, "concurrency.account_timeout must be positive, got -1s"},
 		{"account_timeout zero", func(c *Config) { c.Concurrency.AccountTimeout = 0 }, "concurrency.account_timeout must be positive, got 0s"},
 		{"database empty", func(c *Config) { c.Database = "" }, "database must not be empty"},
-		{"imap_domains nil", func(c *Config) { c.Email.IMAPDomains = nil }, "email.imap_domains is required"},
-		{"imap_domains empty", func(c *Config) { c.Email.IMAPDomains = []string{} }, "email.imap_domains is required"},
+		{"imap_domains nil with a user that is no address", func(c *Config) { c.Email.IMAPDomains = nil },
+			`email.imap_user must be an email address when email.imap_domains is empty, got "user"`},
+		{"imap_domains empty with an address as the user", func(c *Config) { c.Email.IMAPDomains, c.Email.IMAPUser = []string{}, "user@example.com" }, ""},
 		{"imap_domains bad entry", func(c *Config) { c.Email.IMAPDomains = []string{"localhost"} }, `email.imap_domains[0] "localhost" is not a valid domain name`},
 		{"imap_domains two domains", func(c *Config) { c.Email.IMAPDomains = []string{"a.example.com", "b.example.com"} }, ""},
 	}
@@ -443,8 +445,8 @@ func TestValidateDomains(t *testing.T) {
 		domains []string
 		want    []string // the error texts in order. Empty means valid
 	}{
-		{name: "nil", want: []string{"email.imap_domains is required"}},
-		{name: "empty", domains: []string{}, want: []string{"email.imap_domains is required"}},
+		{name: "nil"},
+		{name: "empty", domains: []string{}},
 		{name: "one domain", domains: []string{"penguinlover.me"}},
 		{name: "many labels", domains: []string{"sub.example.co.uk"}},
 		{name: "the xn-- form", domains: []string{"xn--bcher-kva.example"}},
@@ -474,7 +476,7 @@ func TestValidateDomains(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []string
-			for _, err := range validateDomains(tt.domains) {
+			for _, err := range validateDomains("email.imap_domains", tt.domains) {
 				got = append(got, err.Error())
 			}
 			if !slices.Equal(got, tt.want) {
@@ -506,9 +508,9 @@ func TestValidateIMAPRequiredFields(t *testing.T) {
 			want: "imap_pass",
 		},
 		{
-			name: "missing domain",
+			name: "missing domain with a user that is no address",
 			cfg:  EmailConfig{IMAPHost: "h", IMAPUser: "u", IMAPPass: "p"},
-			want: "imap_domains",
+			want: `email.imap_user must be an email address when email.imap_domains is empty, got "u"`,
 		},
 	}
 	for _, tt := range tests {
@@ -517,12 +519,164 @@ func TestValidateIMAPRequiredFields(t *testing.T) {
 			applyDefaults(cfg)
 			cfg.Email = tt.cfg       // restore test values after defaults
 			cfg.Email.IMAPPort = 993 // avoid port error
+			cfg.Email.Auth = AuthPassword
 			err := Validate(cfg)
 			if err == nil {
 				t.Fatal("expected validation error")
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("expected error to mention %q, got: %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestValidateNoDomain(t *testing.T) {
+	const countErr = "concurrency.account_count must not exceed %d, the count of the mailboxes, " +
+		"because a mailbox with no imap_domains makes one account, at its own address, got %d"
+	mailbox := func(user string, domains ...string) MailboxConfig {
+		return MailboxConfig{IMAPHost: "mail.example.org", IMAPPort: 993, IMAPUser: user, IMAPPass: "pass", IMAPDomains: domains, Auth: AuthPassword}
+	}
+	threeMailboxes := func(c *Config) {
+		c.Email.Mailboxes = []MailboxConfig{mailbox("a@example.org"), mailbox("b@example.org"), mailbox("c@example.org")}
+	}
+	tests := []struct {
+		name    string
+		set     func(*Config)
+		wantErr string // empty means valid
+	}{
+		{"one account as the user", func(*Config) {}, ""},
+		{"two accounts from one mailbox", func(c *Config) { c.Concurrency.AccountCount = 2 }, fmt.Sprintf(countErr, 1, 2)},
+		{"no account limit makes one account per mailbox", func(c *Config) { c.Concurrency.AccountCount = -1 }, ""},
+		{"one account per mailbox of the list", func(c *Config) { threeMailboxes(c); c.Concurrency.AccountCount = 3 }, ""},
+		{"more accounts than the mailboxes of the list", func(c *Config) { threeMailboxes(c); c.Concurrency.AccountCount = 4 }, fmt.Sprintf(countErr, 3, 4)},
+		{"a mailbox of the list with domains lifts the limit", func(c *Config) {
+			threeMailboxes(c)
+			c.Email.Mailboxes[1].IMAPDomains, c.Concurrency.AccountCount = []string{"example.com"}, 50
+		}, ""},
+		{"a mailbox of the list with no host", func(c *Config) { threeMailboxes(c); c.Email.Mailboxes[1].IMAPHost = "" },
+			"email.mailboxes[1].imap_host is required"},
+		{"a mailbox of the list whose oauth2 has no client", func(c *Config) {
+			threeMailboxes(c)
+			c.Email.Mailboxes[2].Auth = AuthOAuth2
+			c.Email.Mailboxes[2].OAuth2 = OAuth2Config{RefreshToken: "refresh", TokenURL: "https://login.example.org/token"}
+		}, "email.mailboxes[2].oauth2.client_id is required"},
+		{"two mailboxes of the list with one address", func(c *Config) { threeMailboxes(c); c.Email.Mailboxes[2].IMAPUser = "A@example.org" },
+			`email.mailboxes[2].imap_user repeats the address of email.mailboxes[0], "A@example.org"`},
+		{"two mailboxes of the list with one address and domains", func(c *Config) {
+			threeMailboxes(c)
+			c.Email.Mailboxes[2].IMAPUser, c.Email.Mailboxes[2].IMAPDomains = "a@example.org", []string{"example.com"}
+		}, ""},
+		{"a user that is no address", func(c *Config) { c.Email.IMAPUser = "user" },
+			`email.imap_user must be an email address when email.imap_domains is empty, got "user"`},
+		{"domains allow a user that is no address and many accounts", func(c *Config) {
+			c.Email.IMAPDomains, c.Email.IMAPUser, c.Concurrency.AccountCount = []string{"example.com"}, "user", 5
+		}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{Email: validEmail()}
+			cfg.Email.IMAPDomains, cfg.Email.IMAPUser = nil, "user@example.org"
+			applyDefaults(cfg)
+			tt.set(cfg)
+			err := Validate(cfg)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected valid config, got: %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("Validate error = %v, want exactly %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestMailboxDefaults(t *testing.T) {
+	cfg := &Config{Email: EmailConfig{Mailboxes: []MailboxConfig{{}, {IMAPPort: 143, Auth: AuthOAuth2}}}}
+	applyDefaults(cfg)
+	if got := cfg.Email.Mailboxes[0]; got.IMAPPort != 993 || got.IMAPDomains == nil || len(got.IMAPDomains) != 0 || got.Auth != AuthPassword {
+		t.Errorf("Mailboxes[0] = %+v, want port 993, an empty domain list and auth %q", got, AuthPassword)
+	}
+	if got := cfg.Email.Mailboxes[1]; got.IMAPPort != 143 || got.Auth != AuthOAuth2 {
+		t.Errorf("Mailboxes[1] = %+v, want its own port 143 and auth %q", got, AuthOAuth2)
+	}
+}
+
+// The email section of a mailbox holds each key of the mailbox, and Mailbox gives the mailbox back.
+func TestMailboxEmailConfig(t *testing.T) {
+	m := MailboxConfig{IMAPHost: "h", IMAPPort: 143, IMAPUser: "u@example.com", IMAPPass: "p", IMAPDomains: []string{"example.com"},
+		Auth: AuthOAuth2, OAuth2: validOAuth2()}
+	e := m.EmailConfig()
+	if e.Mailboxes != nil || !reflect.DeepEqual(e.Mailbox(), m) {
+		t.Errorf("EmailConfig() = %+v, want the keys of %+v and no mailboxes list", e, m)
+	}
+}
+
+func TestDefaultAuth(t *testing.T) {
+	cfg := &Config{}
+	applyDefaults(cfg)
+	if cfg.Email.Auth != AuthPassword {
+		t.Errorf("Email.Auth = %q, want %q", cfg.Email.Auth, AuthPassword)
+	}
+	cfg = &Config{Email: EmailConfig{Auth: AuthOAuth2}}
+	applyDefaults(cfg)
+	if cfg.Email.Auth != AuthOAuth2 {
+		t.Errorf("Email.Auth = %q, want %q (explicit)", cfg.Email.Auth, AuthOAuth2)
+	}
+}
+
+// validOAuth2 returns a complete oauth2 section of a confidential client.
+func validOAuth2() OAuth2Config {
+	return OAuth2Config{ClientID: "client", ClientSecret: "secret", RefreshToken: "refresh", TokenURL: "https://oauth2.example.com/token"}
+}
+
+func TestValidateAuth(t *testing.T) {
+	const urlErr = "email.oauth2.token_url must be an http or https URL, got "
+	// oauth2 sets auth oauth2 with a complete section, and then edit.
+	oauth2 := func(edit func(*OAuth2Config)) func(*EmailConfig) {
+		return func(e *EmailConfig) {
+			e.Auth, e.IMAPPass, e.OAuth2 = AuthOAuth2, "", validOAuth2()
+			edit(&e.OAuth2)
+		}
+	}
+	tests := []struct {
+		name    string
+		set     func(*EmailConfig)
+		wantErr string // empty means valid
+	}{
+		{"password with a password", func(*EmailConfig) {}, ""},
+		{"password with no password", func(e *EmailConfig) { e.IMAPPass = "" }, "email.imap_pass is required"},
+		{"oauth2 complete", oauth2(func(*OAuth2Config) {}), ""},
+		{"oauth2 of a public client", oauth2(func(o *OAuth2Config) { o.ClientSecret = "" }), ""},
+		{"oauth2 over http", oauth2(func(o *OAuth2Config) { o.TokenURL = "http://127.0.0.1:8080/token" }), ""},
+		{"oauth2 with no client_id", oauth2(func(o *OAuth2Config) { o.ClientID = "" }), "email.oauth2.client_id is required"},
+		{"oauth2 with no refresh_token", oauth2(func(o *OAuth2Config) { o.RefreshToken = "" }), "email.oauth2.refresh_token is required"},
+		{"oauth2 with no token_url", oauth2(func(o *OAuth2Config) { o.TokenURL = "" }), "email.oauth2.token_url is required"},
+		{"oauth2 with a token_url of another scheme", oauth2(func(o *OAuth2Config) { o.TokenURL = "ftp://oauth2.example.com/token" }),
+			urlErr + `"ftp://oauth2.example.com/token"`},
+		{"oauth2 with a token_url of no host", oauth2(func(o *OAuth2Config) { o.TokenURL = "https:///token" }), urlErr + `"https:///token"`},
+		{"oauth2 with a token_url that does not parse", oauth2(func(o *OAuth2Config) { o.TokenURL = "https://oauth2.example.com/%zz" }),
+			urlErr + `"https://oauth2.example.com/%zz"`},
+		{"oauth2 with an empty section", oauth2(func(o *OAuth2Config) { *o = OAuth2Config{} }),
+			"email.oauth2.client_id is required\nemail.oauth2.refresh_token is required\nemail.oauth2.token_url is required"},
+		{"an unknown auth", func(e *EmailConfig) { e.Auth = "plain" }, `email.auth must be "password" or "oauth2", got "plain"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{Email: validEmail()}
+			applyDefaults(cfg)
+			tt.set(&cfg.Email)
+			err := Validate(cfg)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected valid config, got: %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("Validate error = %v, want exactly %q", err, tt.wantErr)
 			}
 		})
 	}

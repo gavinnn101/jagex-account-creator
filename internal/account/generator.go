@@ -31,7 +31,7 @@ func GenerateName() string {
 
 // GenerateEmail returns a new account's email address: a GenerateName local
 // part at one domain of domains, picked at random. An empty list panics.
-// config.Validate refuses an empty list, so no run reaches the panic.
+// IMAPProvider.Address calls it only with a list that has a domain.
 func GenerateEmail(domains []string) string {
 	return GenerateName() + "@" + domains[cryptoRandIntn(len(domains))]
 }

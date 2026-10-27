@@ -13,11 +13,13 @@ const config: Config = {
   database: 'creator.db',
   debug: false,
   email: {
+    auth: 'password',
     imap_domains: ['example.com', 'example.org'],
     imap_host: 'imap.example.com',
     imap_pass_set: true,
     imap_port: 993,
     imap_user: 'user',
+    oauth2: { client_id: '', client_secret_set: false, refresh_token_set: false, token_url: '' },
   },
   proxy: { direct: true },
 };
@@ -145,28 +147,38 @@ describe('configEntries', () => {
       ['concurrency.max_workers', '4'],
       ['database', 'creator.db'],
       ['debug', 'false'],
+      ['email.auth', 'password'],
       ['email.imap_domains', 'example.com, example.org'],
       ['email.imap_host', 'imap.example.com'],
       ['email.imap_pass_set', 'true'],
       ['email.imap_port', '993'],
       ['email.imap_user', 'user'],
+      ['email.oauth2.client_id', ''],
+      ['email.oauth2.client_secret_set', 'false'],
+      ['email.oauth2.refresh_token_set', 'false'],
+      ['email.oauth2.token_url', ''],
       ['proxy.direct', 'true'],
     ]);
   });
 
   it('keeps an empty value and gives no row for an absent key', () => {
     const email = {
+      auth: 'password' as const,
       imap_domains: ['example.com'],
       imap_host: 'imap.example.com',
       imap_port: 993,
       imap_user: '',
+      oauth2: { client_id: '', token_url: '' },
     };
     const rows = configEntries({ ...config, email });
     expect(rows.filter(([key]) => key.startsWith('email.'))).toEqual([
+      ['email.auth', 'password'],
       ['email.imap_domains', 'example.com'],
       ['email.imap_host', 'imap.example.com'],
       ['email.imap_port', '993'],
       ['email.imap_user', ''],
+      ['email.oauth2.client_id', ''],
+      ['email.oauth2.token_url', ''],
     ]);
   });
 

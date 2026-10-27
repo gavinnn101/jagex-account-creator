@@ -14,6 +14,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"jagex_account_creator/internal/account"
 	"jagex_account_creator/internal/api"
 	"jagex_account_creator/internal/config"
 )
@@ -262,6 +263,38 @@ func TestStartRunOtherDatabase(t *testing.T) {
 		t.Errorf("result = %+v, want the one error %q", got, want)
 	}
 	assertPhase(t, runRequest(t.Context(), t, s, "GET", "/api/run", "", http.StatusOK), api.RunPhaseIdle)
+}
+
+// A start with no domains refuses a mailbox that already has an account, before a run row exists.
+func TestStartRunMailboxUsed(t *testing.T) {
+	s := newRunAPI(t, nil)
+	if err := s.store.WriteAccount(t.Context(), &account.Account{Email: "used@outlook.com", Username: "u", Password: "p", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	noDomain := func(user string) string {
+		return postedConfig(t, s.cfg, func(c *api.Config) {
+			c.Email.ImapDomains, c.Email.ImapUser, c.Concurrency.AccountCount = []string{}, user, 1
+		})
+	}
+	var got api.ValidationResult
+	decodeBody(t, doAPI(t.Context(), s.handler(), "POST", "/api/run", noDomain("used@outlook.com")), http.StatusUnprocessableEntity, &got)
+	if want := "too few mailboxes with no account: each of the 1 mailbox already has an account. Add mailboxes with no account"; got.Valid || len(got.Errors) != 1 || got.Errors[0] != want {
+		t.Errorf("result = %+v, want the one mailbox error", got)
+	}
+	assertPhase(t, runRequest(t.Context(), t, s, "GET", "/api/run", "", http.StatusOK), api.RunPhaseIdle)
+	if runs, _, err := s.store.Runs(t.Context(), 0, 10); err != nil || len(runs) != 0 {
+		t.Errorf("runs = %+v, %v, want none", runs, err)
+	}
+
+	t.Run("a store that fails the check answers 500", func(t *testing.T) {
+		if err := s.store.Close(); err != nil {
+			t.Fatal(err)
+		}
+		w := doAPI(t.Context(), s.handler(), "POST", "/api/run", noDomain("new@outlook.com"))
+		if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "checking the mailbox new@outlook.com for an account: ") {
+			t.Errorf("answer = %d %s, want 500 with the check error", w.Code, w.Body.String())
+		}
+	})
 }
 
 // A subscriber of the run state never misses the start of a run.

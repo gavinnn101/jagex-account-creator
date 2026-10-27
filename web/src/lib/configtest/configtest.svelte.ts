@@ -18,6 +18,13 @@ export function configFixture(): Config {
       imap_user: 'user@example.com',
       imap_pass_set: false,
       imap_domains: ['example.com'],
+      auth: 'password',
+      oauth2: {
+        client_id: '',
+        client_secret_set: false,
+        refresh_token_set: false,
+        token_url: '',
+      },
     },
     account: { password_length: 16, enable_totp: true },
     concurrency: { max_workers: 10, max_browsers: 10, account_count: 10, account_timeout: '1m' },

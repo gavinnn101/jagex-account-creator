@@ -19,7 +19,9 @@ A Go tool that creates Jagex accounts. Chrome loads the Jagex page and solves th
 - Google Chrome or Chromium. The tool finds it on the usual install paths, or on `PATH`. Set `CHROME_PATH` to use a different binary.
 - Go, at the version of the `go` line in `go.mod`.
 - Node 26.12.1, the pin of `web/.nvmrc`, to build the dashboard.
-- An IMAP mailbox that gets the mail of every address of each domain in `imap_domains` (a catch-all). Each attempt takes one of these domains at random and makes a new address `<12 random letters and digits>@<domain>`. The tool logs in to the mailbox over TLS and reads the verification code from `INBOX`.
+- An IMAP mailbox. The tool logs in to it over TLS and reads the verification code from `INBOX`. It works in one of two ways:
+  - A catch-all: the mailbox gets the mail of every address of each domain in `imap_domains`. Each attempt takes one of these domains at random and makes a new address `<12 random letters and digits>@<domain>`.
+  - One account at its own address: with an empty `imap_domains`, the account's email is `imap_user`. A list of such mailboxes, for example Outlook mailboxes, makes one account at each. See [Mailbox list](#mailbox-list).
 - Proxies, HTTP or SOCKS5. A run with no enabled proxy stops at start, unless `proxy.direct` is `true`.
 
 ## Build
@@ -37,7 +39,7 @@ The binary embeds the dashboard. After a change in `web/src`, build the dashboar
 ## Quick start
 
 1. Copy the template: `cp config.yaml config.local.yaml`.
-2. In `config.local.yaml`, set `email.imap_host`, `email.imap_user`, `email.imap_pass` and `email.imap_domains`.
+2. In `config.local.yaml`, set `email.imap_host`, `email.imap_user`, `email.imap_domains` (or leave it empty for one account at `imap_user`) and the login: `email.imap_pass`, or the `email.oauth2` keys with `email.auth: oauth2` (see [Mailbox login](#mailbox-login-password-or-oauth2)).
 3. Start serve mode: `./creator -mode serve`.
 4. Open http://127.0.0.1:8080.
 5. On the **Proxies** screen, open "Import proxies". Paste your proxy lines or pick a file, then click Import.
@@ -52,18 +54,53 @@ The **Logs** screen shows the log lines of the run. The **Runs** screen shows th
 
 The keys to set:
 
-| Key                         | Use                                                                                    |
-| --------------------------- | -------------------------------------------------------------------------------------- |
-| `email.imap_host`           | The IMAP server, for example `imap.example.com`                                        |
-| `email.imap_user`           | The login of the mailbox                                                               |
-| `email.imap_pass`           | The password of the mailbox                                                            |
-| `email.imap_domains`        | The list of the domains of the new addresses, for example `[example.com, example.org]` |
-| `database`                  | The path of the SQLite database. The default is `creator.db`                           |
-| `proxy.direct`              | `true` runs with no proxy and ignores the proxy list                                   |
-| `concurrency.max_workers`   | The number of attempts in parallel                                                     |
-| `concurrency.account_count` | The number of accounts to create. `-1` is no limit                                     |
+| Key                         | Use                                                                            |
+| --------------------------- | ------------------------------------------------------------------------------ |
+| `email.imap_host`           | The IMAP server, for example `imap.example.com`                                |
+| `email.imap_user`           | The login of the mailbox                                                       |
+| `email.imap_pass`           | The password of the mailbox, when `email.auth` is `password`                   |
+| `email.imap_domains`        | The catch-all domains of the new addresses. Empty: one account, at `imap_user` |
+| `database`                  | The path of the SQLite database. The default is `creator.db`                   |
+| `proxy.direct`              | `true` runs with no proxy and ignores the proxy list                           |
+| `concurrency.max_workers`   | The number of attempts in parallel                                             |
+| `concurrency.account_count` | The number of accounts to create. `-1` is no limit                             |
 
 Each entry of `email.imap_domains` is an ASCII domain name with at least one dot, in any case, and no entry repeats. Write a non-ASCII domain in its `xn--` form.
+
+### Mailbox login: password or OAuth2
+
+`email.auth` picks how the run logs in to the mailbox:
+
+- `password`, the default: logs in with `email.imap_pass`, the mailbox password or an app password.
+- `oauth2`: logs in with XOAUTH2, as Gmail and Outlook allow. Set `email.oauth2.client_id`, `email.oauth2.refresh_token` and `email.oauth2.token_url`. Set `email.oauth2.client_secret` only when the app has one. Each IMAP login trades the refresh token for an access token at the token endpoint, and reuses that token until it expires.
+
+| Provider | IMAP host               | Token URL                                                    |
+| -------- | ----------------------- | ------------------------------------------------------------ |
+| Outlook  | `outlook.office365.com` | `https://login.microsoftonline.com/common/oauth2/v2.0/token` |
+| Gmail    | `imap.gmail.com`        | `https://oauth2.googleapis.com/token`                        |
+
+A token endpoint that refuses the client or the refresh token (`invalid_grant`, `invalid_client`, `invalid_scope` or `unauthorized_client`) fails the login as a wrong password does. Any other token error, such as a timeout, counts as a failed connection, so the wait for a verification code tries again.
+
+The dashboard never shows a saved password, client secret or refresh token. Leave the field empty to keep the saved one. Presets and the run history never store them.
+
+Limitation: a token endpoint that rotates the refresh token returns a new one that the config never stores. Google and Microsoft keep the old one valid, so this matters only for a provider that revokes it.
+
+### Mailbox list
+
+`email.mailboxes` is a list of mailboxes, each with the keys of the email section: `imap_host`, `imap_port`, `imap_user`, `imap_pass`, `imap_domains`, `auth` and `oauth2`. When the list has a mailbox, a run uses the list in place of the email section.
+
+- A mailbox with `imap_domains` is a catch-all. Any number of accounts share it, in rotation.
+- A mailbox with no `imap_domains` makes one account, at its own `imap_user`, because Jagex registers an address once. A worker keeps the mailbox across the retries of one account, and takes the next mailbox once the account is saved.
+- At start, the run skips each such mailbox whose address already has a saved account. With only such mailboxes, an `account_count` of `-1` makes one account at each mailbox that is left, and a larger count than that is refused.
+- The run checks the login of each mailbox that its accounts use, 8 at a time.
+
+The **Paste mailbox lines** box in the Mailbox section fills the list from lines such as:
+
+```
+someone@outlook.com:password:refresh_token:client_id
+```
+
+The parts can come in any order, split by `:`, `|` or `----`. The email, the client ID (a GUID) and the refresh token are told apart by their shape, and the password is dropped. Each line becomes one OAuth2 mailbox with no domains. The first line, or the one you pick, also fills the login fields. The host and the token URL default to Outlook's where the section has none. The box flags a pasted mailbox whose address already has an account, and **Check N mailboxes** logs in to each mailbox and can remove the failed ones. The pasted text stays while you switch screens, and a page reload clears it.
 
 ## CLI use
 

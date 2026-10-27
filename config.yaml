@@ -11,14 +11,23 @@ proxy:
   direct: false          # Run with no proxy and ignore the list
 
 email:
-  # imap_host, imap_user, imap_pass and imap_domains are required. Put real values in config.local.yaml.
+  # imap_host and imap_user are required. Put real values in config.local.yaml.
   # A failed login at start stops the run.
   imap_host: ""
   imap_port: 993
   imap_user: ""
-  imap_pass: ""
-  # The domains of the new addresses, for example [example.com, example.org]. Each attempt takes one at random.
+  imap_pass: ""          # required when auth is password
+  # The catch-all domains of the new addresses, for example [example.com, example.org]. Each attempt takes one at random.
+  # Empty: the mailbox makes one account, at imap_user, which must then be an email address.
   imap_domains: []
+  auth: password         # password, or oauth2 for an XOAUTH2 login (Gmail, Outlook)
+  oauth2:
+    # With auth oauth2, client_id, refresh_token and token_url are required.
+    # client_secret stays empty for a public client.
+    client_id: ""
+    client_secret: ""
+    refresh_token: ""
+    token_url: ""        # for example https://oauth2.googleapis.com/token
 
 account:
   password_length: 16

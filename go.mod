@@ -11,6 +11,7 @@ require (
 	github.com/oapi-codegen/runtime v1.7.0
 	github.com/sardanioss/httpcloak v1.7.3
 	golang.org/x/net v0.61.0
+	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0

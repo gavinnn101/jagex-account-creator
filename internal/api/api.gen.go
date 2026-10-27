@@ -18,6 +18,42 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for EmailConfigAuth.
+const (
+	EmailAuthOAuth2   EmailConfigAuth = "oauth2"
+	EmailAuthPassword EmailConfigAuth = "password"
+)
+
+// Valid indicates whether the value is a known member of the EmailConfigAuth enum.
+func (e EmailConfigAuth) Valid() bool {
+	switch e {
+	case EmailAuthOAuth2:
+		return true
+	case EmailAuthPassword:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MailboxConfigAuth.
+const (
+	MailboxAuthOAuth2   MailboxConfigAuth = "oauth2"
+	MailboxAuthPassword MailboxConfigAuth = "password"
+)
+
+// Valid indicates whether the value is a known member of the MailboxConfigAuth enum.
+func (e MailboxConfigAuth) Valid() bool {
+	switch e {
+	case MailboxAuthOAuth2:
+		return true
+	case MailboxAuthPassword:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RunSource.
 const (
 	RunSourceCLI   RunSource = "cli"
@@ -150,6 +186,23 @@ type Account struct {
 type AccountConfig struct {
 	EnableTotp     bool `json:"enable_totp"`
 	PasswordLength int  `json:"password_length"`
+}
+
+// AccountLookup defines model for AccountLookup.
+type AccountLookup struct {
+	Emails []string `json:"emails"`
+}
+
+// AccountLookupResult defines model for AccountLookupResult.
+type AccountLookupResult struct {
+	Accounts []AccountMatch `json:"accounts"`
+}
+
+// AccountMatch A posted email and the id of its saved account
+type AccountMatch struct {
+	// Email The email as posted
+	Email string `json:"email"`
+	Id    int64  `json:"id"`
 }
 
 // AccountPage A page of accounts, newest first
@@ -312,7 +365,10 @@ type Config struct {
 
 // EmailConfig defines model for EmailConfig.
 type EmailConfig struct {
-	// ImapDomains The domains of the new addresses. Each attempt takes one at random.
+	// Auth password logs in with imap_pass, oauth2 with XOAUTH2 and an access token from the refresh token of oauth2
+	Auth EmailConfigAuth `json:"auth"`
+
+	// ImapDomains The catch-all domains of the new addresses. Each attempt takes one at random. An empty list means the mailbox makes one account, whose address is imap_user.
 	ImapDomains []string `json:"imap_domains"`
 	ImapHost    string   `json:"imap_host"`
 
@@ -320,10 +376,17 @@ type EmailConfig struct {
 	ImapPass *string `json:"imap_pass,omitempty"`
 
 	// ImapPassSet True when the config of serve, as read at start or last saved, holds an IMAP password. A request ignores it.
-	ImapPassSet *bool  `json:"imap_pass_set,omitempty"`
-	ImapPort    int    `json:"imap_port"`
-	ImapUser    string `json:"imap_user"`
+	ImapPassSet *bool              `json:"imap_pass_set,omitempty"`
+	ImapPort    int                `json:"imap_port"`
+	ImapUser    string             `json:"imap_user"`
+	Mailboxes   *MailboxConfigList `json:"mailboxes,omitempty"`
+
+	// Oauth2 The refresh-token grant of an XOAUTH2 login. Only an email section whose auth is oauth2 uses it.
+	Oauth2 OAuth2Config `json:"oauth2"`
 }
+
+// EmailConfigAuth password logs in with imap_pass, oauth2 with XOAUTH2 and an access token from the refresh token of oauth2
+type EmailConfigAuth string
 
 // Error defines model for Error.
 type Error struct {
@@ -354,15 +417,73 @@ type LogLine struct {
 
 // MailboxCheck defines model for MailboxCheck.
 type MailboxCheck struct {
+	// Error The error of the login. With a mailboxes list, the count of the failed logins
 	Error *string `json:"error,omitempty"`
+
+	// Mailboxes The login of each mailbox of the mailboxes list, in list order. Absent for an email section with no list
+	Mailboxes *[]MailboxLogin `json:"mailboxes,omitempty"`
+
+	// Ok True when every login succeeded
+	Ok bool `json:"ok"`
+}
+
+// MailboxConfig One mailbox of a run. The list replaces the mailbox of the email section. With no imap_domains, the mailbox makes one account, at imap_user. In a request, an absent secret takes the stored secret of the stored mailbox with the same imap_user.
+type MailboxConfig struct {
+	// Auth password logs in with imap_pass, oauth2 with XOAUTH2 and an access token from the refresh token of oauth2
+	Auth        MailboxConfigAuth `json:"auth"`
+	ImapDomains []string          `json:"imap_domains"`
+	ImapHost    string            `json:"imap_host"`
+
+	// ImapPass Absent in a response. In a request, absent means the stored password.
+	ImapPass *string `json:"imap_pass,omitempty"`
+
+	// ImapPassSet True when the stored config holds an IMAP password for this mailbox. A request ignores it.
+	ImapPassSet *bool  `json:"imap_pass_set,omitempty"`
+	ImapPort    int    `json:"imap_port"`
+	ImapUser    string `json:"imap_user"`
+
+	// Oauth2 The refresh-token grant of an XOAUTH2 login. Only an email section whose auth is oauth2 uses it.
+	Oauth2 OAuth2Config `json:"oauth2"`
+}
+
+// MailboxConfigAuth password logs in with imap_pass, oauth2 with XOAUTH2 and an access token from the refresh token of oauth2
+type MailboxConfigAuth string
+
+// MailboxConfigList defines model for MailboxConfigList.
+type MailboxConfigList = []MailboxConfig
+
+// MailboxLogin The login check of one mailbox of a mailboxes list
+type MailboxLogin struct {
+	Error    *string `json:"error,omitempty"`
+	ImapUser string  `json:"imap_user"`
 
 	// Ok True when the login succeeded
 	Ok bool `json:"ok"`
 }
 
+// OAuth2Config The refresh-token grant of an XOAUTH2 login. Only an email section whose auth is oauth2 uses it.
+type OAuth2Config struct {
+	ClientId string `json:"client_id"`
+
+	// ClientSecret Absent in a response. In a request, absent means the stored client secret. Empty for a public client.
+	ClientSecret *string `json:"client_secret,omitempty"`
+
+	// ClientSecretSet True when the config of serve, as read at start or last saved, holds a client secret. A request ignores it.
+	ClientSecretSet *bool `json:"client_secret_set,omitempty"`
+
+	// RefreshToken Absent in a response. In a request, absent means the stored refresh token.
+	RefreshToken *string `json:"refresh_token,omitempty"`
+
+	// RefreshTokenSet True when the config of serve, as read at start or last saved, holds a refresh token. A request ignores it.
+	RefreshTokenSet *bool `json:"refresh_token_set,omitempty"`
+
+	// TokenUrl The token endpoint, for example https://oauth2.googleapis.com/token
+	TokenUrl string `json:"token_url"`
+}
+
 // Preset One named run config of the store. It holds no IMAP password.
 type Preset struct {
-	// Config The config of the preset. database and email.imap_pass_set are the values of the config of serve, not the saved values.
+	// Config The config of the preset. database, email.imap_pass_set, email.oauth2.client_secret_set and email.oauth2.refresh_token_set are the values of the config of serve, not the saved values.
 	Config Config `json:"config"`
 	Id     int64  `json:"id"`
 
@@ -753,6 +874,9 @@ type ListRunAttemptsParams struct {
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// LookupAccountsJSONRequestBody defines body for LookupAccounts for application/json ContentType.
+type LookupAccountsJSONRequestBody = AccountLookup
+
 // CheckMailboxJSONRequestBody defines body for CheckMailbox for application/json ContentType.
 type CheckMailboxJSONRequestBody = EmailConfig
 
@@ -779,6 +903,9 @@ type ServerInterface interface {
 	// ExportAccounts Export the saved accounts as a file
 	// (GET /api/accounts/export)
 	ExportAccounts(w http.ResponseWriter, r *http.Request, params ExportAccountsParams)
+	// LookupAccounts The saved accounts of a list of emails
+	// (POST /api/accounts/lookup)
+	LookupAccounts(w http.ResponseWriter, r *http.Request)
 	// GetAccountByID One saved account with its secrets
 	// (GET /api/accounts/{id})
 	GetAccountByID(w http.ResponseWriter, r *http.Request, id ID)
@@ -1123,6 +1250,20 @@ func (siw *ServerInterfaceWrapper) ExportAccounts(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ExportAccounts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// LookupAccounts operation middleware
+func (siw *ServerInterfaceWrapper) LookupAccounts(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LookupAccounts(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1856,6 +1997,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts", wrapper.ListAccounts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts/{id}", wrapper.GetAccountByID)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/accounts/{id}/confirm", wrapper.ConfirmAccount)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/accounts/lookup", wrapper.LookupAccounts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/accounts/export", wrapper.ExportAccounts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/proxies", wrapper.ListProxies)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/proxies/import", wrapper.ImportProxies)
@@ -2042,6 +2184,70 @@ func (response ExportAccounts400JSONResponse) VisitExportAccountsResponse(w http
 type ExportAccounts500JSONResponse struct{ InternalErrorJSONResponse }
 
 func (response ExportAccounts500JSONResponse) VisitExportAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LookupAccountsRequestObject struct {
+	Body *LookupAccountsJSONRequestBody
+}
+
+type LookupAccountsResponseObject interface {
+	VisitLookupAccountsResponse(w http.ResponseWriter) error
+}
+
+type LookupAccounts200JSONResponse AccountLookupResult
+
+func (response LookupAccounts200JSONResponse) VisitLookupAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LookupAccounts400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response LookupAccounts400JSONResponse) VisitLookupAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LookupAccounts413JSONResponse struct{ TooLargeJSONResponse }
+
+func (response LookupAccounts413JSONResponse) VisitLookupAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LookupAccounts500JSONResponse Error
+
+func (response LookupAccounts500JSONResponse) VisitLookupAccountsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -3466,6 +3672,9 @@ type StrictServerInterface interface {
 	// ExportAccounts Export the saved accounts as a file
 	// (GET /api/accounts/export)
 	ExportAccounts(ctx context.Context, request ExportAccountsRequestObject) (ExportAccountsResponseObject, error)
+	// LookupAccounts The saved accounts of a list of emails
+	// (POST /api/accounts/lookup)
+	LookupAccounts(ctx context.Context, request LookupAccountsRequestObject) (LookupAccountsResponseObject, error)
 	// GetAccountByID One saved account with its secrets
 	// (GET /api/accounts/{id})
 	GetAccountByID(ctx context.Context, request GetAccountByIDRequestObject) (GetAccountByIDResponseObject, error)
@@ -3633,6 +3842,37 @@ func (sh *strictHandler) ExportAccounts(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ExportAccountsResponseObject); ok {
 		if err := validResponse.VisitExportAccountsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// LookupAccounts operation middleware
+func (sh *strictHandler) LookupAccounts(w http.ResponseWriter, r *http.Request) {
+	var request LookupAccountsRequestObject
+
+	var body LookupAccountsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.LookupAccounts(ctx, request.(LookupAccountsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "LookupAccounts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LookupAccountsResponseObject); ok {
+		if err := validResponse.VisitLookupAccountsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
