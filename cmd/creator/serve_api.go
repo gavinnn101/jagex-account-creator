@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -151,15 +152,44 @@ func chromeCheck(ctx context.Context) api.ChromeCheck {
 	return result
 }
 
-// CheckMailbox logs in to the mailbox of the posted email section.
+// CheckMailbox logs in to the mailbox of the posted email section. With a
+// mailboxes list, it logs in to each mailbox of the list in its place.
 func (s *apiServer) CheckMailbox(ctx context.Context, r api.CheckMailboxRequestObject) (api.CheckMailboxResponseObject, error) {
 	cfg := *s.config()
 	cfg.Email = emailFromAPI(*r.Body, cfg.Email)
+	if len(cfg.Email.Mailboxes) > 0 {
+		return api.CheckMailbox200JSONResponse(s.checkMailboxes(ctx, &cfg)), nil
+	}
 	result := api.MailboxCheck{Ok: true}
 	if err := s.checkLogin(ctx, &cfg); err != nil {
 		result = api.MailboxCheck{Error: new(err.Error())}
 	}
 	return api.CheckMailbox200JSONResponse(result), nil
+}
+
+// checkMailboxes logs in to each mailbox of the mailboxes list of cfg, at most
+// maxLoginChecks at a time. Each login gets cfg with that mailbox as its email section.
+func (s *apiServer) checkMailboxes(ctx context.Context, cfg *config.Config) api.MailboxCheck {
+	list := cfg.Email.Mailboxes
+	errs := loginErrors(ctx, list, func(ctx context.Context, mb config.MailboxConfig) error {
+		one := *cfg
+		one.Email = mb.EmailConfig()
+		return s.checkLogin(ctx, &one)
+	})
+	logins := make([]api.MailboxLogin, len(list))
+	failed := 0
+	for i, mb := range list {
+		logins[i] = api.MailboxLogin{ImapUser: mb.IMAPUser, Ok: errs[i] == nil}
+		if errs[i] != nil {
+			logins[i].Error = new(errs[i].Error())
+			failed++
+		}
+	}
+	result := api.MailboxCheck{Ok: failed == 0, Mailboxes: &logins}
+	if failed > 0 {
+		result.Error = new(fmt.Sprintf("%d of %d mailboxes failed the login", failed, len(list)))
+	}
+	return result
 }
 
 // checkLogin logs in to the mailbox of cfg, as a run start does.
@@ -184,12 +214,8 @@ func apiConfig(cfg *config.Config) api.Config {
 			ImapPassSet: new(cfg.Email.IMAPPass != ""),
 			ImapDomains: cfg.Email.IMAPDomains,
 			Auth:        api.EmailConfigAuth(cfg.Email.Auth),
-			Oauth2: api.OAuth2Config{
-				ClientId:        cfg.Email.OAuth2.ClientID,
-				ClientSecretSet: new(cfg.Email.OAuth2.ClientSecret != ""),
-				RefreshTokenSet: new(cfg.Email.OAuth2.RefreshToken != ""),
-				TokenUrl:        cfg.Email.OAuth2.TokenURL,
-			},
+			Oauth2:      apiOAuth2(cfg.Email.OAuth2),
+			Mailboxes:   apiMailboxes(cfg.Email.Mailboxes),
 		},
 		Account: api.AccountConfig{PasswordLength: cfg.Account.PasswordLength, EnableTotp: *cfg.Account.EnableTOTP},
 		Concurrency: api.ConcurrencyConfig{
@@ -199,6 +225,47 @@ func apiConfig(cfg *config.Config) api.Config {
 			AccountTimeout: cfg.Concurrency.AccountTimeout.String(),
 		},
 	}
+}
+
+// apiOAuth2 returns the API form of o. In place of each secret, it tells whether o holds one.
+func apiOAuth2(o config.OAuth2Config) api.OAuth2Config {
+	return api.OAuth2Config{
+		ClientId:        o.ClientID,
+		ClientSecretSet: new(o.ClientSecret != ""),
+		RefreshTokenSet: new(o.RefreshToken != ""),
+		TokenUrl:        o.TokenURL,
+	}
+}
+
+// apiMailboxes returns the API form of the mailboxes list, or nil for an empty list, so the key stays absent.
+func apiMailboxes(list []config.MailboxConfig) *api.MailboxConfigList {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make(api.MailboxConfigList, len(list))
+	for i, m := range list {
+		out[i] = api.MailboxConfig{
+			ImapHost:    m.IMAPHost,
+			ImapPort:    m.IMAPPort,
+			ImapUser:    m.IMAPUser,
+			ImapPassSet: new(m.IMAPPass != ""),
+			ImapDomains: m.IMAPDomains,
+			Auth:        api.MailboxConfigAuth(m.Auth),
+			Oauth2:      apiOAuth2(m.OAuth2),
+		}
+	}
+	return &out
+}
+
+// storedMailbox returns the mailbox of stored whose imap_user is user, ignoring
+// the case of ASCII letters, or the zero mailbox when stored has none.
+func storedMailbox(stored []config.MailboxConfig, user string) config.MailboxConfig {
+	for _, mb := range stored {
+		if strings.EqualFold(mb.IMAPUser, user) {
+			return mb
+		}
+	}
+	return config.MailboxConfig{}
 }
 
 // configJSON returns the stored form of cfg: the JSON of apiConfig, so it holds no email secret.
@@ -234,21 +301,44 @@ func configFromAPI(c api.Config, stored config.EmailConfig) (*config.Config, err
 }
 
 // emailFromAPI returns the config form of e. An absent imap_pass, client_secret
-// or refresh_token takes the one of stored.
+// or refresh_token takes the one of stored. A posted mailbox of the mailboxes
+// list takes the secrets of the stored mailbox with the same imap_user, so a
+// list that drops or moves a mailbox keeps the secrets of the others.
 func emailFromAPI(e api.EmailConfig, stored config.EmailConfig) config.EmailConfig {
-	return config.EmailConfig{
+	email := config.EmailConfig{
 		IMAPHost:    e.ImapHost,
 		IMAPPort:    e.ImapPort,
 		IMAPUser:    e.ImapUser,
 		IMAPPass:    orStored(e.ImapPass, stored.IMAPPass),
 		IMAPDomains: e.ImapDomains,
 		Auth:        string(e.Auth),
-		OAuth2: config.OAuth2Config{
-			ClientID:     e.Oauth2.ClientId,
-			ClientSecret: orStored(e.Oauth2.ClientSecret, stored.OAuth2.ClientSecret),
-			RefreshToken: orStored(e.Oauth2.RefreshToken, stored.OAuth2.RefreshToken),
-			TokenURL:     e.Oauth2.TokenUrl,
-		},
+		OAuth2:      oauth2FromAPI(e.Oauth2, stored.OAuth2),
+	}
+	if e.Mailboxes == nil {
+		return email
+	}
+	for _, m := range *e.Mailboxes {
+		s := storedMailbox(stored.Mailboxes, m.ImapUser)
+		email.Mailboxes = append(email.Mailboxes, config.MailboxConfig{
+			IMAPHost:    m.ImapHost,
+			IMAPPort:    m.ImapPort,
+			IMAPUser:    m.ImapUser,
+			IMAPPass:    orStored(m.ImapPass, s.IMAPPass),
+			IMAPDomains: m.ImapDomains,
+			Auth:        string(m.Auth),
+			OAuth2:      oauth2FromAPI(m.Oauth2, s.OAuth2),
+		})
+	}
+	return email
+}
+
+// oauth2FromAPI returns the config form of o. An absent secret takes the one of stored.
+func oauth2FromAPI(o api.OAuth2Config, stored config.OAuth2Config) config.OAuth2Config {
+	return config.OAuth2Config{
+		ClientID:     o.ClientId,
+		ClientSecret: orStored(o.ClientSecret, stored.ClientSecret),
+		RefreshToken: orStored(o.RefreshToken, stored.RefreshToken),
+		TokenURL:     o.TokenUrl,
 	}
 }
 

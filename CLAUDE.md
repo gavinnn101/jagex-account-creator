@@ -25,7 +25,8 @@ cmd/
     flags.go             # CLI flags and their config overrides
     workers.go           # Worker pool, Chrome slots and the failure backoff
     attempt.go           # One account creation attempt and its browser half
-    emailauth.go         # The IMAP provider of the email section, with a password or an OAuth2 (XOAUTH2) login
+    emailauth.go         # The mailboxes of a config, and the IMAP provider of one mailbox with a password or an OAuth2 (XOAUTH2) login
+    mailboxes.go         # The mailbox pool of a run: one account at each mailbox with no domains, the rotation of a catch-all mailbox, the skip of a used mailbox and the login checks at start
     browserphase.go      # Chrome launch, CDP set-up, the page load and the clearance wait of both modes
     proxy.go             # The proxy load of a run from the store, and the forward proxies and the proxy cooldown of one attempt
     register.go          # The HTTP registration of one attempt and the login-link fetch
@@ -52,7 +53,7 @@ cmd/
 internal/
   account/
     types.go             # Account data types
-    generator.go         # Username, email address (a random local part at a random domain of the list), password, DOB generation
+    generator.go         # Username, email address (a random local part at a random domain of the list), password, DOB generation. IMAPProvider.Address calls GenerateEmail
     totp.go              # TOTP (2FA) code generation (RFC 6238), and the current code with the seconds left in its window
   api/
     openapi.yaml         # The HTTP API contract of serve mode (OpenAPI 3.1)
@@ -501,7 +502,7 @@ email:
   imap_port: 993
   imap_user: ""
   imap_pass: ""          # Required when auth is password
-  imap_domains: []       # Domains of the generated addresses (e.g., [example.com, example.org]). Each attempt takes one at random
+  imap_domains: []       # Catch-all domains of the generated addresses (e.g., [example.com, example.org]). Each attempt takes one at random. Empty: one account, at imap_user
   auth: password         # password, or oauth2 for an XOAUTH2 login (Gmail, Outlook)
   oauth2:                # Used when auth is oauth2. client_id, refresh_token and token_url are required
     client_id: ""
@@ -522,7 +523,7 @@ concurrency:
 
 `account_timeout` covers the attempt up to the password POST. The work after the POST has its own bounds, so the real upper bound is `account_timeout` + 60 s.
 
-Each entry of `imap_domains` is an ASCII domain name with at least one dot, in any case, and no entry repeats. A non-ASCII domain goes in its `xn--` form.
+Each entry of `imap_domains` is an ASCII domain name with at least one dot, in any case, and no entry repeats. A non-ASCII domain goes in its `xn--` form. An empty `imap_domains` means one account at the mailbox's own address, so `imap_user` must then hold an `@`, and `account_count` must not exceed the count of the mailboxes.
 
 The config holds no proxy list. The store holds it, and the Proxies screen edits it. The one-time import of `proxies.txt` from the directory of the database moves a proxy file into the store. See "Account store and exports".
 
@@ -582,7 +583,7 @@ Every request passes these checks in order:
 1. The Host check. The host name must be `localhost` or an IP address, with or without a port. Any other host gets 421. This check stops a DNS rebinding page.
 2. A `Sec-Fetch-Site` of `cross-site` or `same-site` gets 403, on every method.
 3. `http.CrossOriginProtection`.
-4. The body bound of 64 KiB. A larger body gets 413.
+4. The body bound of 8 MiB. A larger body gets 413. A config with a pasted mailbox list holds a refresh token of about 1 KB for each mailbox, so the bound leaves room for thousands of mailboxes.
 5. The `Cross-Origin-Resource-Policy: same-origin` and `X-Content-Type-Options: nosniff` headers.
 
 Serve holds one run at a time. These endpoints control it:
@@ -590,7 +591,7 @@ Serve holds one run at a time. These endpoints control it:
 - `GET /api/run` returns the state of the current or last run.
 - `GET /api/events` sends the current run state, then the full state after each change, as server-sent events. Each event is the same document as the answer of `GET /api/run`.
 - `GET /api/logs` sends the log lines of the current or last run that serve started, as server-sent events. It first sends the lines that the log file of the run holds, then each new line. A new run sends its lines on the same stream. Each event holds one line in its parts as one JSON object. Each event also has an id, `<run_id>:<end>`, where `end` is the byte offset after the line in the file. The lines are at the level of the stderr lines. Serve's own lines go only to stderr.
-- `POST /api/run` validates the posted config and starts a run with it. It returns 202 and the state. A run in progress, or a serve that stops, gets 409. An invalid config gets 422. A body that does not parse gets 400.
+- `POST /api/run` validates the posted config and starts a run with it. It returns 202 and the state. A run in progress, or a serve that stops, gets 409. An invalid config gets 422. A config whose mailboxes with no domains all have an account, or whose count is above the mailboxes left, also gets 422, before a run row exists. A body that does not parse gets 400.
 - `POST /api/run/stop` calls the first stop stage of the run.
 - `POST /api/run/stop-now` calls the second stop stage of the run.
 
@@ -615,6 +616,7 @@ These endpoints read the accounts of the store, and the confirm writes one accou
 
 - `GET /api/accounts` returns a page of the accounts that the filters select, newest first. An account of the list holds no password, no TOTP secret and no backup codes. The answer also holds `total`, the count of all the accounts that the filters select.
 - `GET /api/accounts/{id}` returns one account with every field, the password, the TOTP secret and the backup codes included. An account with a TOTP secret also gets `totp_code` and `totp_remaining_seconds`. They are the code of the current 30 s window and the seconds left in it, from the server clock. A secret that does not decode gets neither. An account that does not exist gets 404.
+- `POST /api/accounts/lookup` returns the id of the saved account of each posted email that has one, in the order of the emails. The match ignores the case of ASCII letters. The paste box of the mailboxes uses it.
 - `POST /api/accounts/{id}/confirm` marks one account as checked by hand. It sets `unconfirmed` to false and returns the account with no secrets. A second call changes nothing and also gets 200. An account that does not exist gets 404. Serve logs one INFO line `account confirmed` with the id.
 - `GET /api/accounts/export?format=<format>` returns one file with every account that the filters select, in id order, with no paging. The `Content-Disposition` header marks the file as an attachment named `accounts.jsonl`, `accounts.csv` or `accounts.txt`.
 
@@ -909,7 +911,7 @@ The run screen at `/` shows these parts, from top to bottom:
 1. The control bar: Start, Stop, Stop now and the presets control. A line under the buttons tells the two stops apart. The run error and the errors of a refused request show under that line.
 2. The status: four cards, then the tables of the workers, the failures and the proxy cooldowns. The cards are the accounts, the success rate, the accounts per hour and the bandwidth per account. Before the first run, one line replaces the cards and the tables. The workers table shows only until the run ends. While a run in progress has no worker, one line replaces that table. The two other tables show only when they have rows.
 3. The chart of the run. It takes the width of its box. The time labels use a round step, such as 2 minutes or 1 hour. The bound is one label for each 90 px of the width, but the bound is never below two labels. The chart uses the finest round step in the bound. When that step gives fewer than two labels, the chart keeps every k-th tick of the next finer step, in the bound. For example, 2-minute labels become 4-minute labels. When the year step gives too many labels, the chart keeps every k-th year in the same way. The finest step is 1 second, so the chart shows at least two labels when the run is 2 seconds long or longer. A shorter run shows one label or none.
-4. The config form, in folding sections. Only the run settings start open. A closed section shows a digest of its values. The Mailbox section takes the IMAP domains in a text area, one domain on each line. It drops a blank line and the spaces around a domain.
+4. The config form, in folding sections. Only the run settings start open. A closed section shows a digest of its values. The Mailbox section takes the IMAP domains in a text area, one domain on each line. It drops a blank line and the spaces around a domain. Above the fields, the paste box (`web/src/lib/run/MailboxPaste.svelte`) fills `email.mailboxes` from pasted `email:password:refresh_token:client_id` lines. `mailboxLine.ts` reads a line by the shape of its parts, and `pasted.svelte.ts` keeps the pasted text across screens until a reload. Each line becomes an OAuth2 mailbox with no domains. The first or the picked line also fills the login fields, with the Outlook host and token URL where the section has none. The box flags each pasted address that `POST /api/accounts/lookup` finds, and removes an address that gets an account during the run.
 
 The page holds one edited copy of the config. `web/src/lib/run/edited.ts` gives it to the control bar and the config form through a context. Start sends the copy. Save sends `PUT /api/config` with the copy. A refused save shows its errors in the form. After a save, the form clears the typed IMAP password and shows the stored placeholder. Save stays on during a run, because a run keeps the config that it started with.
 
@@ -920,7 +922,7 @@ The presets control (`web/src/lib/run/Presets.svelte`) has these parts:
 
 `web/src/routes/+page.ts` loads the config and the presets together.
 
-The mailbox check (`web/src/lib/run/MailboxCheck.svelte`) sends an email section to `POST /api/checks/mailbox`. Serve runs the login check of a run start on it. The check shows in two places:
+The mailbox check (`web/src/lib/run/MailboxCheck.svelte`) sends an email section to `POST /api/checks/mailbox`. Serve runs the login check of a run start on it. With a mailboxes list, serve logs in to each mailbox of the list, 8 at a time, and the check lists each login with OK and Failed filters and "Remove failed". The check shows in two places:
 
 - The Mailbox section of the config form sends the email fields of the form. So the operator can check the typed values before a save.
 - The Checks screen sends the email section of the saved config, with no IMAP password. So serve uses its own password. When the saved config has no mailbox, Check mailbox is off there. A line then tells the operator to set the mailbox on the run screen and save.
@@ -1097,12 +1099,24 @@ The email provider interface (`internal/email/provider.go`):
 
 ```go
 type Provider interface {
+    // Address returns the address of a new account at the mailbox
+    Address() string
+
     // WaitForVerificationCode polls for a verification email and returns the verification code
     WaitForVerificationCode(ctx context.Context, address string, since time.Time, timeout time.Duration) (string, error)
 }
 ```
 
-`IMAPProvider`, with IDLE support, is the only implementation. It matches a mail by its full recipient address, so it reads the mail of each domain of `imap_domains`. `account.GenerateEmail` makes the address. The config loader fails when a required IMAP field is empty. The run checks the mailbox login at start.
+`IMAPProvider`, with IDLE support, is the only implementation. It matches a mail by its full recipient address, so it reads the mail of each domain of `imap_domains`. `Address` makes the address with `account.GenerateEmail`, or returns `User` for a mailbox with no domains. The config loader fails when a required IMAP field is empty.
+
+The mailboxes of a run are `email.mailboxes`, or the email section itself when that list is empty (`emailSources`). `mailboxPlan` (`cmd/creator/mailboxes.go`) builds the pool of a run:
+
+- A mailbox with `imap_domains` is a catch-all. Each account gets a new random address there, so any number of accounts share it, in rotation.
+- A mailbox with no `imap_domains` makes one account, at its own `imap_user`. Jagex registers an address once. A worker keeps the mailbox across the retries of one account, and claims the next mailbox after the account is in the store (`workerMailbox`).
+- At start, the run drops each such mailbox whose address already has an account in the store (`AccountByEmail`). With only such mailboxes, an `account_count` of -1 makes one account at each mailbox that is left, and a larger count than that gets the error `too few mailboxes with no account` (422 on a serve start). `Validate` also refuses a count above the number of these mailboxes.
+- The run checks the login of each mailbox that its accounts use, 8 at a time. The error names the address of each failed mailbox.
+
+In a request, a posted mailbox of the list takes the stored secrets of the stored mailbox with the same `imap_user`, so a list that drops or moves a mailbox keeps the secrets of the others. A preset answer gives each mailbox the set flags of the mailbox of serve with its `imap_user`.
 
 `email.auth` picks the login. `password` sends LOGIN with `imap_pass`. `oauth2` sends `AUTHENTICATE XOAUTH2` with an access token. `newEmailProvider` (`cmd/creator/emailauth.go`) gives the provider a `golang.org/x/oauth2` token source of the refresh-token grant, so each connection asks it for a token, and the source refreshes the token only when it expires. The token comes before the dial, so a failed refresh opens no connection.
 

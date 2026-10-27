@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -139,6 +140,36 @@ func TestSavePresetAPI(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A mailbox of the list takes the set flags of the mailbox of serve with its imap_user, and false with none.
+func TestListPresetsMailboxFlags(t *testing.T) {
+	s := newPresetsAPI(t, &bytes.Buffer{})
+	box := func(user, pass, token string) config.MailboxConfig {
+		return config.MailboxConfig{IMAPHost: "outlook.office365.com", IMAPPort: 993, IMAPUser: user, IMAPPass: pass, IMAPDomains: []string{}, Auth: config.AuthOAuth2,
+			OAuth2: config.OAuth2Config{ClientID: "client", RefreshToken: token, TokenURL: "https://oauth2.example.com/token"}}
+	}
+	s.cfg.Email.Mailboxes = []config.MailboxConfig{box("A@outlook.com", "pass", "token")}
+	// The row holds the flags of its save: none set for a, and all set for b.
+	row := *s.config()
+	row.Email.Mailboxes = []config.MailboxConfig{box("a@outlook.com", "", ""), box("b@outlook.com", "pass", "token")}
+	if _, err := s.store.SavePreset(t.Context(), "list", configJSON(&row), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	list := listPresets(t, s.handler())
+
+	if len(list.Presets) != 1 || list.Presets[0].Config.Email.Mailboxes == nil {
+		t.Fatalf("list = %+v, want one preset with a mailboxes list", list)
+	}
+	// The flags of each mailbox: imap_pass_set, client_secret_set and refresh_token_set.
+	got := make([][3]bool, 0, len(*list.Presets[0].Config.Email.Mailboxes))
+	for _, mb := range *list.Presets[0].Config.Email.Mailboxes {
+		got = append(got, [3]bool{*mb.ImapPassSet, *mb.Oauth2.ClientSecretSet, *mb.Oauth2.RefreshTokenSet})
+	}
+	if want := [][3]bool{{true, false, true}, {false, false, false}}; !slices.Equal(got, want) {
+		t.Errorf("flags = %+v, want %+v", got, want)
+	}
 }
 
 // imap_pass_set describes serve, so a posted password with none in serve answers false, as the list does.

@@ -90,10 +90,14 @@ func (r *runner) startWorkers(ctx context.Context, g *errgroup.Group, logger *sl
 		ws := workerState{state: r.state, worker: i}
 		g.Go(func() error {
 			defer ws.idle()
-			// Each worker gets its own email provider, so the provider's log lines carry the worker.
-			emailProvider := newEmailProvider(ctx, r.cfg, workerLog)
+			// Each worker claims its own mailbox, so the provider's log lines carry the worker.
+			mailbox := &workerMailbox{pool: r.mailboxes, logger: workerLog}
 
 			return loop(ctx, workerLog, ws, func(ctx context.Context, logger *slog.Logger) error {
+				emailProvider, err := mailbox.get(ctx)
+				if err != nil {
+					return err
+				}
 				// The proxy wait and the slot wait come before the per-account timeout, so they take no time from the attempt.
 				// Limitation: with max_browsers below max_workers, a worker holds its proxy during the slot wait. A cooldown set in that wait does not stop the attempt. The waiting attempt counts as in flight on its proxy, so the share of the running attempts can skew toward the proxies of the waiters.
 				ws.waitProxy()
@@ -112,7 +116,9 @@ func (r *runner) startWorkers(ctx context.Context, g *errgroup.Group, logger *sl
 				defer slot.release()
 				acctCtx, acctCancel := context.WithTimeout(ctx, r.cfg.Concurrency.AccountTimeout)
 				defer acctCancel()
-				return create(acctCtx, logger, ws, emailProvider, p, slot)
+				err = create(acctCtx, logger, ws, emailProvider, p, slot)
+				mailbox.done(err)
+				return err
 			}, bo)
 		})
 	}

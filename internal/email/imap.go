@@ -16,6 +16,8 @@ import (
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
 	"golang.org/x/oauth2"
+
+	"jagex_account_creator/internal/account"
 )
 
 // verificationCodeRe matches the Jagex registration verification code in the email HTML.
@@ -31,6 +33,10 @@ type IMAPProvider struct {
 	User string // IMAP login username (full email)
 	Pass string // IMAP login password, used when TokenSource is nil
 
+	// Domains are the catch-all domains of the mailbox. Each new account takes one at
+	// random. Empty means the mailbox has one address, User, so it makes one account.
+	Domains []string
+
 	// TokenSource, when set, gives the OAuth2 access tokens for an XOAUTH2 login in place of Pass.
 	// Each connection asks it for a token, so it must be safe for concurrent use, as the
 	// sources of golang.org/x/oauth2 are.
@@ -40,6 +46,15 @@ type IMAPProvider struct {
 	Logger       *slog.Logger
 
 	dialFn func(ctx context.Context, addr string) (net.Conn, error) // test override
+}
+
+// Address returns a new random address at one of Domains. With no Domains, the
+// mailbox has one address, User, so it returns User.
+func (p *IMAPProvider) Address() string {
+	if len(p.Domains) == 0 {
+		return p.User
+	}
+	return account.GenerateEmail(p.Domains)
 }
 
 // pollInterval returns PollInterval, or 2s when it is zero.

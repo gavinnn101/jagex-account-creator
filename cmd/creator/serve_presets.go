@@ -79,9 +79,31 @@ func (s *apiServer) DeletePreset(ctx context.Context, r api.DeletePresetRequestO
 // presetAnswer returns the API form of p with the config c. The row keeps the
 // stored form of runs.config, but database and the set flags of the email
 // secrets describe serve, not the preset, so they come from serve, the API form
-// of the config of serve.
+// of the config of serve. A mailbox of the list takes the flags of the mailbox
+// of serve with the same imap_user, or false when serve has none.
 func presetAnswer(p *store.Preset, c, serve api.Config) api.Preset {
 	c.Database, c.Email.ImapPassSet = serve.Database, serve.Email.ImapPassSet
 	c.Email.Oauth2.ClientSecretSet, c.Email.Oauth2.RefreshTokenSet = serve.Email.Oauth2.ClientSecretSet, serve.Email.Oauth2.RefreshTokenSet
+	if c.Email.Mailboxes != nil {
+		// The list of the row is the stored JSON, so the copy changes no shared slice.
+		for i := range *c.Email.Mailboxes {
+			mb := &(*c.Email.Mailboxes)[i]
+			s := serveMailbox(serve.Email.Mailboxes, mb.ImapUser)
+			mb.ImapPassSet, mb.Oauth2.ClientSecretSet, mb.Oauth2.RefreshTokenSet = s.ImapPassSet, s.Oauth2.ClientSecretSet, s.Oauth2.RefreshTokenSet
+		}
+	}
 	return api.Preset{Id: p.ID, Name: p.Name, SavedAt: p.SavedAt, Config: c}
+}
+
+// serveMailbox returns the mailbox of list whose imap_user is user, ignoring the
+// case of ASCII letters. With none, it returns a mailbox whose set flags are false.
+func serveMailbox(list *api.MailboxConfigList, user string) api.MailboxConfig {
+	if list != nil {
+		for _, mb := range *list {
+			if strings.EqualFold(mb.ImapUser, user) {
+				return mb
+			}
+		}
+	}
+	return api.MailboxConfig{ImapPassSet: new(false), Oauth2: api.OAuth2Config{ClientSecretSet: new(false), RefreshTokenSet: new(false)}}
 }

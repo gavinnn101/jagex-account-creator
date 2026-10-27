@@ -15,7 +15,9 @@ import (
 
 const (
 	// maxBodyBytes bounds a request body, because the generated JSON decode reads with no limit.
-	maxBodyBytes = 64 << 10
+	// A config with a pasted mailbox list holds a refresh token of about 1 KB for each mailbox,
+	// so the bound leaves room for thousands of mailboxes.
+	maxBodyBytes = 8 << 20
 	// shutdownTimeout bounds the wait for the open requests after a stop.
 	shutdownTimeout   = 5 * time.Second
 	readHeaderTimeout = 5 * time.Second

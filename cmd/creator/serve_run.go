@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"jagex_account_creator/internal/api"
@@ -26,6 +27,12 @@ func (s *apiServer) StartRun(ctx context.Context, r api.StartRunRequestObject) (
 	}
 	if !result.Valid {
 		return api.StartRun422JSONResponse(result), nil
+	}
+	// The run checks again at its start. This check answers the start before a run row exists.
+	if _, _, _, err := mailboxPlan(ctx, s.store, cfg); errors.Is(err, errTooFewMailboxes) {
+		return api.StartRun422JSONResponse{Errors: []string{err.Error()}}, nil
+	} else if err != nil {
+		return nil, err
 	}
 
 	s.mu.Lock()

@@ -76,7 +76,7 @@ export interface paths {
         put?: never;
         /**
          * Log in to the mailbox of an email section
-         * @description Connects to the IMAP server of the posted email section, logs in and logs out. With auth oauth2, it first gets an access token from the token endpoint. An absent imap_pass, client_secret or refresh_token means the one of the config of serve, as read at start or last saved.
+         * @description Connects to the IMAP server of the posted email section, logs in and logs out. With auth oauth2, it first gets an access token from the token endpoint. An absent imap_pass, client_secret or refresh_token means the one of the config of serve, as read at start or last saved. With a mailboxes list, it logs in to each mailbox of the list in place of the section, 8 at a time, and answers the login of each.
          */
         post: operations["checkMailbox"];
         delete?: never;
@@ -320,6 +320,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/accounts/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The saved accounts of a list of emails
+         * @description Returns the id of the saved account of each posted email that has one, in the order of the emails. The match ignores the case of ASCII letters. An email with no account has no item. The paste box of the mailboxes uses it, because a mailbox with no imap_domains makes one account, and a run skips a mailbox whose address has one.
+         */
+        post: operations["lookupAccounts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/accounts/export": {
         parameters: {
             query?: never;
@@ -555,7 +575,25 @@ export interface components {
             imap_pass?: string;
             /** @description True when the config of serve, as read at start or last saved, holds an IMAP password. A request ignores it. */
             readonly imap_pass_set?: boolean;
-            /** @description The domains of the new addresses. Each attempt takes one at random. */
+            /** @description The catch-all domains of the new addresses. Each attempt takes one at random. An empty list means the mailbox makes one account, whose address is imap_user. */
+            imap_domains: string[];
+            /**
+             * @description password logs in with imap_pass, oauth2 with XOAUTH2 and an access token from the refresh token of oauth2
+             * @enum {string}
+             */
+            auth: "password" | "oauth2";
+            oauth2: components["schemas"]["OAuth2Config"];
+            mailboxes?: components["schemas"]["MailboxConfigList"];
+        };
+        /** @description One mailbox of a run. The list replaces the mailbox of the email section. With no imap_domains, the mailbox makes one account, at imap_user. In a request, an absent secret takes the stored secret of the stored mailbox with the same imap_user. */
+        MailboxConfig: {
+            imap_host: string;
+            imap_port: number;
+            imap_user: string;
+            /** @description Absent in a response. In a request, absent means the stored password. */
+            imap_pass?: string;
+            /** @description True when the stored config holds an IMAP password for this mailbox. A request ignores it. */
+            readonly imap_pass_set?: boolean;
             imap_domains: string[];
             /**
              * @description password logs in with imap_pass, oauth2 with XOAUTH2 and an access token from the refresh token of oauth2
@@ -564,6 +602,7 @@ export interface components {
             auth: "password" | "oauth2";
             oauth2: components["schemas"]["OAuth2Config"];
         };
+        MailboxConfigList: components["schemas"]["MailboxConfig"][];
         /** @description The refresh-token grant of an XOAUTH2 login. Only an email section whose auth is oauth2 uses it. */
         OAuth2Config: {
             client_id: string;
@@ -605,9 +644,32 @@ export interface components {
             mismatch?: boolean;
         };
         MailboxCheck: {
+            /** @description True when every login succeeded */
+            ok: boolean;
+            /** @description The error of the login. With a mailboxes list, the count of the failed logins */
+            error?: string;
+            /** @description The login of each mailbox of the mailboxes list, in list order. Absent for an email section with no list */
+            mailboxes?: components["schemas"]["MailboxLogin"][];
+        };
+        /** @description The login check of one mailbox of a mailboxes list */
+        MailboxLogin: {
+            imap_user: string;
             /** @description True when the login succeeded */
             ok: boolean;
             error?: string;
+        };
+        AccountLookup: {
+            emails: string[];
+        };
+        AccountLookupResult: {
+            accounts: components["schemas"]["AccountMatch"][];
+        };
+        /** @description A posted email and the id of its saved account */
+        AccountMatch: {
+            /** @description The email as posted */
+            email: string;
+            /** Format: int64 */
+            id: number;
         };
         /** @description The state of the current or last run of serve */
         RunState: {
@@ -1041,7 +1103,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description The body is larger than 64 KiB */
+        /** @description The body is larger than 8 MiB */
         TooLarge: {
             headers: {
                 [name: string]: unknown;
@@ -1592,6 +1654,41 @@ export interface operations {
             400: components["responses"]["BadParameter"];
             404: components["responses"]["NotFound"];
             /** @description The server could not write or read the account. The message names the failed step. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    lookupAccounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountLookup"];
+            };
+        };
+        responses: {
+            /** @description The accounts of the emails */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountLookupResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            413: components["responses"]["TooLarge"];
+            /** @description The server could not read the accounts. The message names the failed step. */
             500: {
                 headers: {
                     [name: string]: unknown;

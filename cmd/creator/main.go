@@ -182,13 +182,14 @@ func stopNowContext(ctx context.Context, stopNow <-chan struct{}) (context.Conte
 // runner holds the dependencies that the attempts of one run share.
 // Challenge mode fills only cfg, cache and override.
 type runner struct {
-	cfg      *config.Config
-	proxyMgr *proxy.Manager
-	history  runHistory
-	cache    *browser.CacheManager
-	override *browser.UserAgentOverride // nil in a headful run
-	stopNow  <-chan struct{}            // closed by runControl.StopNow
-	state    *runState                  // nil in the CLI
+	cfg       *config.Config
+	mailboxes *mailboxPool // the mailbox of each account
+	proxyMgr  *proxy.Manager
+	history   runHistory
+	cache     *browser.CacheManager
+	override  *browser.UserAgentOverride // nil in a headful run
+	stopNow   <-chan struct{}            // closed by runControl.StopNow
+	state     *runState                  // nil in the CLI
 }
 
 // runCLI opens the account store of cfg and runs the full mode as one run of
@@ -210,8 +211,16 @@ func runCLI(ctx context.Context, stopNow <-chan struct{}, logger *slog.Logger, l
 // run creates the accounts of cfg. The workers mark their progress on state,
 // which is nil in the CLI. Each attempt saves its account and its row to history.
 func run(ctx context.Context, stopNow <-chan struct{}, logger *slog.Logger, cfg *config.Config, state *runState, history runHistory) error { // coverage-ignore: needs a live Chrome
-	if err := newEmailProvider(ctx, cfg, logger).CheckLogin(ctx); err != nil {
-		return fmt.Errorf("checking the mailbox: %w", err)
+	mailboxes, accountCount, used, err := mailboxPlan(ctx, history.accounts, cfg)
+	if err != nil {
+		return err
+	}
+	logger.Info("mailboxes loaded", "count", len(mailboxes.sources), "already_used", used)
+	err = mailboxes.checkLogins(ctx, accountCount, func(ctx context.Context, src config.MailboxConfig) error {
+		return buildProviderFromSource(ctx, logger, src).CheckLogin(ctx)
+	})
+	if err != nil {
+		return err
 	}
 
 	override, err := resolveUserAgent(ctx, logger, cfg)
@@ -225,7 +234,6 @@ func run(ctx context.Context, stopNow <-chan struct{}, logger *slog.Logger, cfg 
 		return fmt.Errorf("initializing browser cache: %w", err)
 	}
 
-	accountCount := cfg.Concurrency.AccountCount
 	unlimited := accountCount < 0
 	if unlimited {
 		logger.Info("running in unlimited mode, will create accounts until stopped")
@@ -238,7 +246,7 @@ func run(ctx context.Context, stopNow <-chan struct{}, logger *slog.Logger, cfg 
 		return err
 	}
 
-	r := &runner{cfg: cfg, proxyMgr: proxyMgr, history: history, cache: cache, override: override, stopNow: stopNow, state: state}
+	r := &runner{cfg: cfg, mailboxes: mailboxes, proxyMgr: proxyMgr, history: history, cache: cache, override: override, stopNow: stopNow, state: state}
 
 	g, gCtx := errgroup.WithContext(ctx)
 

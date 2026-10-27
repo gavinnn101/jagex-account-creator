@@ -17,6 +17,7 @@ import (
 
 	"jagex_account_creator/internal/account"
 	"jagex_account_creator/internal/config"
+	"jagex_account_creator/internal/email"
 	"jagex_account_creator/internal/jagexapi"
 	"jagex_account_creator/internal/logtest"
 	"jagex_account_creator/internal/useragent"
@@ -209,11 +210,15 @@ func TestRegisterOverHTTPFetchFailure(t *testing.T) {
 }
 
 // fakeEmailProvider records each verification wait and returns code and err.
+// Its Address is address.
 type fakeEmailProvider struct {
-	code  string
-	err   error
-	waits []emailWait
+	address string
+	code    string
+	err     error
+	waits   []emailWait
 }
+
+func (f *fakeEmailProvider) Address() string { return f.address }
 
 // emailWait holds the arguments of one WaitForVerificationCode call.
 type emailWait struct {
@@ -479,7 +484,7 @@ func TestGenerateIdentity(t *testing.T) {
 
 	t.Run("generates every field", func(t *testing.T) {
 		var buf bytes.Buffer
-		a := &attempt{run: &runner{cfg: cfg}, logger: logtest.New(&buf)}
+		a := &attempt{run: &runner{cfg: cfg}, emailProvider: &email.IMAPProvider{Domains: cfg.Email.IMAPDomains}, logger: logtest.New(&buf)}
 		id := a.generateIdentity()
 		if local, ok := strings.CutSuffix(id.email, "@example.com"); !ok || len(local) != 12 {
 			t.Errorf("email = %q, want a 12-character local part at the domain of the config", id.email)

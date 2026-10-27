@@ -25,6 +25,25 @@ import (
 	"jagex_account_creator/internal/logtest"
 )
 
+func TestIMAPProvider_Address(t *testing.T) {
+	p := &IMAPProvider{User: "user@example.org"}
+	if got, want := p.Address(), "user@example.org"; got != want {
+		t.Errorf("Address with no domains = %q, want the user %q", got, want)
+	}
+	p.Domains = []string{"example.com", "example.net"}
+	seen := map[string]bool{}
+	for range 64 {
+		local, domain, ok := strings.Cut(p.Address(), "@")
+		if !ok || len(local) != 12 || !slices.Contains(p.Domains, domain) {
+			t.Fatalf("Address = %s@%s, want a 12-character local part at one of %q", local, domain, p.Domains)
+		}
+		seen[domain] = true
+	}
+	if len(seen) != 2 {
+		t.Errorf("64 addresses took the domains %v, want both of %q", seen, p.Domains)
+	}
+}
+
 func TestIMAPProvider_PollInterval(t *testing.T) {
 	tests := []struct {
 		set, want time.Duration

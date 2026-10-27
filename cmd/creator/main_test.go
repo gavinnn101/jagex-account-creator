@@ -295,7 +295,7 @@ func TestRunCLI(t *testing.T) {
 	level.Set(slog.LevelWarn)
 	err = runCLI(t.Context(), nil, logtest.New(io.Discard), &level, cfg)
 
-	const prefix = "checking the mailbox: connecting to IMAP: "
+	prefix := "checking the mailbox: " + cfg.Email.IMAPUser + ": connecting to IMAP: "
 	if err == nil || !strings.HasPrefix(err.Error(), prefix) {
 		t.Fatalf("runCLI() = %v, want the prefix %q", err, prefix)
 	}

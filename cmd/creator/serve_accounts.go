@@ -56,6 +56,22 @@ func (s *apiServer) GetAccountByID(ctx context.Context, r api.GetAccountByIDRequ
 	return api.GetAccountByID200JSONResponse(out), nil
 }
 
+// LookupAccounts returns the id of the saved account of each posted email that has one, in the order of the emails.
+func (s *apiServer) LookupAccounts(ctx context.Context, r api.LookupAccountsRequestObject) (api.LookupAccountsResponseObject, error) {
+	matches := []api.AccountMatch{}
+	for _, email := range r.Body.Emails {
+		a, err := s.store.AccountByEmail(ctx, email)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		matches = append(matches, api.AccountMatch{Email: email, Id: a.ID})
+	}
+	return api.LookupAccounts200JSONResponse{Accounts: matches}, nil
+}
+
 // ConfirmAccount marks one account as checked by hand and returns it with no
 // secret. A second call changes nothing.
 func (s *apiServer) ConfirmAccount(ctx context.Context, r api.ConfirmAccountRequestObject) (api.ConfirmAccountResponseObject, error) {

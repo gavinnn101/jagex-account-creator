@@ -42,6 +42,8 @@ WHERE (?1 = 0 OR t.run_id = ?1)
 
 const selectAccountSQL = selectAccountColumnsSQL + ` WHERE a.id = ?`
 
+const selectAccountByEmailSQL = selectAccountColumnsSQL + ` WHERE a.email = ? COLLATE NOCASE ORDER BY a.id LIMIT 1`
+
 const confirmAccountSQL = `UPDATE accounts SET unconfirmed = 0 WHERE id = ?`
 
 // A before of 0 is the first page.
@@ -126,6 +128,23 @@ func (s *Store) Account(ctx context.Context, id int64) (StoredAccount, error) {
 	}
 	if len(accounts) == 0 {
 		return StoredAccount{}, fmt.Errorf("reading account %d: %w", id, ErrNotFound)
+	}
+	return accounts[0], nil
+}
+
+// AccountByEmail returns the account whose email is email, ignoring the case of
+// ASCII letters. The error matches ErrNotFound when no account has that email.
+func (s *Store) AccountByEmail(ctx context.Context, email string) (StoredAccount, error) {
+	rows, err := queryRows(ctx, s.db, "account", (*accountRow).dest, selectAccountByEmailSQL, email)
+	if err != nil {
+		return StoredAccount{}, err
+	}
+	accounts, err := convertRows(rows, (*accountRow).stored)
+	if err != nil {
+		return StoredAccount{}, err
+	}
+	if len(accounts) == 0 {
+		return StoredAccount{}, fmt.Errorf("reading the account of %s: %w", email, ErrNotFound)
 	}
 	return accounts[0], nil
 }

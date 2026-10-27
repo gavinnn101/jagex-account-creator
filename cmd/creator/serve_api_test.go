@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -219,7 +220,7 @@ func TestValidateConfigBadRequest(t *testing.T) {
 		{"bad chrome.timeout", postedConfig(t, cfg, func(c *api.Config) { c.Chrome.Timeout = "soon" }), `chrome.timeout: time: invalid duration "soon"`, 400},
 		{"bad account_timeout", postedConfig(t, cfg, func(c *api.Config) { c.Concurrency.AccountTimeout = "" }), `concurrency.account_timeout: time: invalid duration ""`, 400},
 		{"not JSON", "{", "can't decode JSON body: ", 400},
-		{"a body over the bound", `{"database":"` + strings.Repeat("a", maxBodyBytes) + `"}`, "the body is larger than 65536 bytes", 413},
+		{"a body over the bound", `{"database":"` + strings.Repeat("a", maxBodyBytes) + `"}`, fmt.Sprintf("the body is larger than %d bytes", maxBodyBytes), 413},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -255,6 +256,34 @@ func TestCheckChrome(t *testing.T) {
 			t.Errorf("result = %+v, want not ok and a version error", got)
 		}
 	})
+}
+
+// A posted mailbox takes the stored secrets of the mailbox with its address, wherever the list has it.
+func TestEmailFromAPIMailboxes(t *testing.T) {
+	storedBox := func(user, pass, token string) config.MailboxConfig {
+		return config.MailboxConfig{IMAPUser: user, IMAPPass: pass, Auth: config.AuthOAuth2,
+			OAuth2: config.OAuth2Config{ClientSecret: "secret-" + user, RefreshToken: token}}
+	}
+	stored := config.EmailConfig{Mailboxes: []config.MailboxConfig{
+		storedBox("a@outlook.com", "pass-a", "token-a"),
+		storedBox("b@outlook.com", "pass-b", "token-b"),
+		storedBox("c@outlook.com", "pass-c", "token-c"),
+	}}
+	posted := func(user string, token *string) api.MailboxConfig {
+		return api.MailboxConfig{ImapUser: user, Auth: api.MailboxConfigAuth(config.AuthOAuth2), Oauth2: api.OAuth2Config{RefreshToken: token}}
+	}
+	list := api.MailboxConfigList{posted("C@Outlook.com", nil), posted("a@outlook.com", nil), posted("d@outlook.com", new("token-d"))}
+
+	got := emailFromAPI(api.EmailConfig{Mailboxes: &list}, stored).Mailboxes
+
+	want := []config.MailboxConfig{
+		{IMAPUser: "C@Outlook.com", IMAPPass: "pass-c", Auth: config.AuthOAuth2, OAuth2: config.OAuth2Config{ClientSecret: "secret-c@outlook.com", RefreshToken: "token-c"}},
+		{IMAPUser: "a@outlook.com", IMAPPass: "pass-a", Auth: config.AuthOAuth2, OAuth2: config.OAuth2Config{ClientSecret: "secret-a@outlook.com", RefreshToken: "token-a"}},
+		{IMAPUser: "d@outlook.com", Auth: config.AuthOAuth2, OAuth2: config.OAuth2Config{RefreshToken: "token-d"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("mailboxes = %+v, want %+v", got, want)
+	}
 }
 
 func TestCheckMailbox(t *testing.T) {
@@ -313,6 +342,57 @@ func TestCheckMailbox(t *testing.T) {
 			t.Errorf("result = %+v, the login got %+v, want ok and the oauth2 section %+v", got, gotCfg, want)
 		}
 	})
+	t.Run("a mailboxes list checks each mailbox in place of the section", func(t *testing.T) {
+		var mu sync.Mutex
+		var gotEmails []config.EmailConfig
+		s := &apiServer{cfg: storedConfig(t, "stored"), logger: logtest.New(io.Discard), checkLoginFn: func(_ context.Context, c *config.Config) error {
+			mu.Lock()
+			defer mu.Unlock()
+			gotEmails = append(gotEmails, c.Email)
+			if c.Email.IMAPUser == "b@outlook.com" {
+				return loginErr
+			}
+			return nil
+		}}
+		mailbox := func(user string) string {
+			return `{"imap_host":"outlook.office365.com","imap_port":993,"imap_user":"` + user + `","imap_domains":[],"auth":"oauth2",` +
+				`"oauth2":{"client_id":"client","refresh_token":"refresh-` + user + `","token_url":"https://oauth2.example.com/token"}}`
+		}
+		body := section + `,"mailboxes":[` + mailbox("a@outlook.com") + "," + mailbox("b@outlook.com") + "," + mailbox("c@outlook.com") + "]}"
+
+		var got api.MailboxCheck
+		decodeBody(t, doAPI(t.Context(), s.handler(), "POST", "/api/checks/mailbox", body), http.StatusOK, &got)
+
+		want := api.MailboxCheck{Error: new("1 of 3 mailboxes failed the login"), Mailboxes: &[]api.MailboxLogin{
+			{ImapUser: "a@outlook.com", Ok: true},
+			{ImapUser: "b@outlook.com", Error: new("login refused")},
+			{ImapUser: "c@outlook.com", Ok: true},
+		}}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("result = %+v, want %+v", got, want)
+		}
+		slices.SortFunc(gotEmails, func(a, b config.EmailConfig) int { return strings.Compare(a.IMAPUser, b.IMAPUser) })
+		users := []string{"a@outlook.com", "b@outlook.com", "c@outlook.com"}
+		wantEmails := make([]config.EmailConfig, 0, len(users))
+		for _, user := range users {
+			wantEmails = append(wantEmails, config.EmailConfig{IMAPHost: "outlook.office365.com", IMAPPort: 993, IMAPUser: user, IMAPDomains: []string{}, Auth: config.AuthOAuth2,
+				OAuth2: config.OAuth2Config{ClientID: "client", RefreshToken: "refresh-" + user, TokenURL: "https://oauth2.example.com/token"}})
+		}
+		if !reflect.DeepEqual(gotEmails, wantEmails) {
+			t.Errorf("the logins got %+v, want one email section for each mailbox, %+v", gotEmails, wantEmails)
+		}
+	})
+	t.Run("a mailboxes list whose every login succeeds", func(t *testing.T) {
+		s := &apiServer{cfg: storedConfig(t, "stored"), logger: logtest.New(io.Discard), checkLoginFn: func(context.Context, *config.Config) error { return nil }}
+		body := section + `,"mailboxes":[{"imap_host":"h","imap_port":993,"imap_user":"a@outlook.com","imap_domains":[],"auth":"password","oauth2":{"client_id":"","token_url":""}}]}`
+
+		var got api.MailboxCheck
+		decodeBody(t, doAPI(t.Context(), s.handler(), "POST", "/api/checks/mailbox", body), http.StatusOK, &got)
+
+		if want := (api.MailboxCheck{Ok: true, Mailboxes: &[]api.MailboxLogin{{ImapUser: "a@outlook.com", Ok: true}}}); !reflect.DeepEqual(got, want) {
+			t.Errorf("result = %+v, want %+v", got, want)
+		}
+	})
 	t.Run("the real login on an ended request", func(t *testing.T) {
 		ended, cancel := context.WithCancel(t.Context())
 		cancel()
@@ -365,8 +445,27 @@ func fillConfig(v reflect.Value) {
 			f.SetInt(int64(i + 1))
 		case f.Kind() == reflect.Bool:
 			f.SetBool(true)
-		case f.Type() == reflect.TypeFor[[]string]():
-			f.Set(reflect.ValueOf([]string{v.Type().Field(i).Name, "second"}))
+		case f.Kind() == reflect.Slice, f.Kind() == reflect.Array:
+			elType := f.Type().Elem()
+			switch elType.Kind() {
+			case reflect.String:
+				slice := reflect.MakeSlice(f.Type(), 1, 1)
+				slice.Index(0).SetString(v.Type().Field(i).Name)
+				f.Set(slice)
+			default:
+				slice := reflect.MakeSlice(f.Type(), 1, 1)
+				zero := reflect.New(elType).Elem()
+				switch zero.Kind() {
+				case reflect.Pointer:
+					zero.Set(reflect.New(elType.Elem()))
+				case reflect.Struct:
+					fillConfig(zero)
+				default:
+					zero.Set(reflect.Zero(elType))
+				}
+				slice.Index(0).Set(zero)
+				f.Set(slice)
+			}
 		default:
 			f.SetString(v.Type().Field(i).Name)
 		}

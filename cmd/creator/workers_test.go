@@ -704,6 +704,47 @@ func slotConfig(maxWorkers, maxBrowsers int) *config.Config {
 	return cfg
 }
 
+// domainMailboxes returns a pool of one mailbox with domains, which every account can claim.
+func domainMailboxes() *mailboxPool {
+	return newMailboxPool([]config.MailboxConfig{{IMAPUser: "user", IMAPDomains: []string{"example.com"}}})
+}
+
+// Each account of a worker claims its own mailbox with no domains. Its retries keep that mailbox.
+func TestStartWorkersMailboxes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pool := newMailboxPool(emailSources(&config.Config{Email: config.EmailConfig{Mailboxes: mailboxes("a@outlook.com", "b@outlook.com", "c@outlook.com")}}))
+		var addresses []string
+		// A failure retries a@outlook.com. Then its account is in the store, and so is the one of
+		// b@outlook.com after a failure that wrote it.
+		results := []error{
+			errors.New("submitting the email: failed"),
+			nil,
+			markedError{err: errors.New("waiting for the account: failed"), mark: errAccountWritten},
+			nil,
+		}
+		create := func(_ context.Context, _ *slog.Logger, _ workerState, p email.Provider, _ proxy.Proxy, _ browserSlot) error {
+			addresses = append(addresses, p.Address())
+			return results[len(addresses)-1]
+		}
+		// The loop makes one attempt more than results holds, and that attempt finds no mailbox.
+		loop := func(ctx context.Context, logger *slog.Logger, _ workerState, createFn func(ctx context.Context, logger *slog.Logger) error, _ workerBackoff) error {
+			for range results {
+				_ = createFn(ctx, logger)
+			}
+			return createFn(ctx, logger)
+		}
+		var g errgroup.Group
+		(&runner{mailboxes: pool, cfg: slotConfig(1, 1), proxyMgr: &proxy.Manager{}}).startWorkers(t.Context(), &g, slog.New(slog.DiscardHandler), 1, create, loop)
+
+		if err := g.Wait(); !errors.Is(err, errNoMailboxLeft) {
+			t.Errorf("Wait = %v, want %v", err, errNoMailboxLeft)
+		}
+		if want := []string{"a@outlook.com", "a@outlook.com", "b@outlook.com", "c@outlook.com"}; !slices.Equal(addresses, want) {
+			t.Errorf("addresses = %v, want %v", addresses, want)
+		}
+	})
+}
+
 // runOnce is a worker loop that makes one attempt.
 func runOnce(ctx context.Context, logger *slog.Logger, _ workerState, createFn func(ctx context.Context, logger *slog.Logger) error, _ workerBackoff) error {
 	return createFn(ctx, logger)
@@ -776,7 +817,7 @@ func TestStartWorkersBrowserSlots(t *testing.T) {
 				return nil
 			}
 			var g errgroup.Group
-			(&runner{cfg: slotConfig(4, 2), proxyMgr: &proxy.Manager{}}).startWorkers(t.Context(), &g, logger, 4, create, runOnce)
+			(&runner{mailboxes: domainMailboxes(), cfg: slotConfig(4, 2), proxyMgr: &proxy.Manager{}}).startWorkers(t.Context(), &g, logger, 4, create, runOnce)
 
 			synctest.Wait()
 			if n := e.count(); n != 2 {
@@ -809,7 +850,7 @@ func TestStartWorkersBrowserSlots(t *testing.T) {
 				return nil
 			}
 			var g errgroup.Group
-			(&runner{cfg: slotConfig(2, 1), proxyMgr: &proxy.Manager{}}).startWorkers(t.Context(), &g, logger, 2, create, runOnce)
+			(&runner{mailboxes: domainMailboxes(), cfg: slotConfig(2, 1), proxyMgr: &proxy.Manager{}}).startWorkers(t.Context(), &g, logger, 2, create, runOnce)
 
 			synctest.Wait()
 			if n := e.count(); n != 1 {
@@ -833,13 +874,13 @@ func TestStartWorkersBrowserSlots(t *testing.T) {
 		{
 			name: "unlimited",
 			start: func(ctx context.Context, g *errgroup.Group, cfg *config.Config, create createFunc) {
-				(&runner{cfg: cfg, proxyMgr: &proxy.Manager{}}).startUnlimitedWorkers(ctx, g, logger, create)
+				(&runner{mailboxes: domainMailboxes(), cfg: cfg, proxyMgr: &proxy.Manager{}}).startUnlimitedWorkers(ctx, g, logger, create)
 			},
 		},
 		{
 			name: "finite",
 			start: func(ctx context.Context, g *errgroup.Group, cfg *config.Config, create createFunc) {
-				(&runner{cfg: cfg, proxyMgr: &proxy.Manager{}}).startFiniteWorkers(ctx, g, logger, 2, create)
+				(&runner{mailboxes: domainMailboxes(), cfg: cfg, proxyMgr: &proxy.Manager{}}).startFiniteWorkers(ctx, g, logger, 2, create)
 			},
 			wantErr: context.Canceled,
 		},
@@ -895,7 +936,7 @@ func TestStartWorkersBrowserSlots(t *testing.T) {
 			}
 			cfg := slotConfig(2, 1)
 			var g errgroup.Group
-			(&runner{cfg: cfg, proxyMgr: mgr}).startWorkers(t.Context(), &g, logger, 2, create, runOnce)
+			(&runner{mailboxes: domainMailboxes(), cfg: cfg, proxyMgr: mgr}).startWorkers(t.Context(), &g, logger, 2, create, runOnce)
 
 			if err := g.Wait(); err != nil {
 				t.Errorf("Wait: %v", err)
@@ -926,7 +967,7 @@ func TestStartWorkersBrowserSlots(t *testing.T) {
 				return nil
 			}
 			var g errgroup.Group
-			(&runner{cfg: slotConfig(1, 1), proxyMgr: mgr}).startWorkers(ctx, &g, logger, 1, create, runOnce)
+			(&runner{mailboxes: domainMailboxes(), cfg: slotConfig(1, 1), proxyMgr: mgr}).startWorkers(ctx, &g, logger, 1, create, runOnce)
 
 			synctest.Wait()
 			cancel()
@@ -954,7 +995,7 @@ func TestStartWorkersReleasesProxy(t *testing.T) {
 				return nil
 			}
 			var g errgroup.Group
-			(&runner{cfg: slotConfig(1, 1), proxyMgr: mgr}).startWorkers(t.Context(), &g, logger, 1, create, runOnce)
+			(&runner{mailboxes: domainMailboxes(), cfg: slotConfig(1, 1), proxyMgr: mgr}).startWorkers(t.Context(), &g, logger, 1, create, runOnce)
 			if err := g.Wait(); err != nil {
 				t.Fatalf("Wait: %v", err)
 			}
@@ -981,7 +1022,7 @@ func TestStartWorkersReleasesProxy(t *testing.T) {
 				return fmt.Errorf("navigating to registration page: %w", ctx.Err())
 			}
 			var g errgroup.Group
-			(&runner{cfg: slotConfig(2, 1), proxyMgr: mgr}).startWorkers(ctx, &g, logger, 2, create, runOnce)
+			(&runner{mailboxes: domainMailboxes(), cfg: slotConfig(2, 1), proxyMgr: mgr}).startWorkers(ctx, &g, logger, 2, create, runOnce)
 
 			// One worker holds the slot, and the other waits for it.
 			synctest.Wait()
@@ -1031,7 +1072,7 @@ func TestStartWorkersRunState(t *testing.T) {
 			return nil
 		}
 		var g errgroup.Group
-		(&runner{cfg: slotConfig(2, 1), proxyMgr: mgr, state: state}).startWorkers(ctx, &g, slog.New(slog.DiscardHandler), 2, create, runOnce)
+		(&runner{mailboxes: domainMailboxes(), cfg: slotConfig(2, 1), proxyMgr: mgr, state: state}).startWorkers(ctx, &g, slog.New(slog.DiscardHandler), 2, create, runOnce)
 
 		synctest.Wait()
 		if got := fmt.Sprint(rowKinds(t, state)); got != "[proxy proxy]" {
@@ -1138,7 +1179,7 @@ func TestStartFiniteWorkers(t *testing.T) {
 					return tt.fail(workerN)
 				}
 
-				r := &runner{cfg: cfg, proxyMgr: &proxy.Manager{}}
+				r := &runner{mailboxes: domainMailboxes(), cfg: cfg, proxyMgr: &proxy.Manager{}}
 				r.startFiniteWorkers(gCtx, g, slog.New(slog.DiscardHandler), tt.accountCount, calls.create(cfg.Concurrency.AccountTimeout, tt.numWorkers, after))
 
 				gotErr := ""
@@ -1168,7 +1209,7 @@ func TestStartUnlimitedWorkers(t *testing.T) {
 		defer cancel()
 		g, gCtx := errgroup.WithContext(ctx)
 
-		r := &runner{cfg: cfg, proxyMgr: &proxy.Manager{}}
+		r := &runner{mailboxes: domainMailboxes(), cfg: cfg, proxyMgr: &proxy.Manager{}}
 		r.startUnlimitedWorkers(gCtx, g, slog.New(slog.DiscardHandler), calls.create(cfg.Concurrency.AccountTimeout, cfg.Concurrency.MaxWorkers, func(n, _ int) error {
 			if n == stopAfter {
 				cancel()

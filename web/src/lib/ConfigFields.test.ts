@@ -102,7 +102,10 @@ describe('ConfigFields', () => {
     const { screen } = await renderFields(saved(false));
     const descriptions: [string, string][] = [
       ['Account count', '-1: no limit.'],
-      ['IMAP domains', 'One domain per line. Each account takes one at random.'],
+      [
+        'IMAP domains',
+        'One domain per line. Each account takes one at random. Empty: one account, at the IMAP user.',
+      ],
       [
         'Account timeout',
         'A Go duration, for example 1m. It bounds each attempt up to the password POST.',
@@ -310,5 +313,27 @@ describe('ConfigFields', () => {
         JSON.stringify({ ...saved(false).email, imap_host: 'imap.example.org' }),
       ],
     ]);
+  });
+
+  it('removes the mailboxes of the failed logins from the list', async () => {
+    const initial = saved(false);
+    const mailbox = (user: string) => ({ ...initial.email, imap_user: user, imap_domains: [] });
+    initial.email.mailboxes = [mailbox('a@outlook.com'), mailbox('b@outlook.com')];
+    const { screen, config } = await renderFields(
+      initial,
+      Response.json({
+        ok: false,
+        error: '1 of 2 mailboxes failed the login',
+        mailboxes: [
+          { imap_user: 'a@outlook.com', ok: false, error: 'refused' },
+          { imap_user: 'b@outlook.com', ok: true },
+        ],
+      }),
+    );
+    await openAll(screen);
+    await screen.getByRole('button', { name: 'Check 2 mailboxes' }).click();
+    await screen.getByRole('button', { name: 'Remove failed (1)' }).click();
+    expect(config.email.mailboxes?.map((m) => m.imap_user)).toEqual(['b@outlook.com']);
+    await expect.element(screen.getByRole('button', { name: 'Check 1 mailbox' })).toBeVisible();
   });
 });

@@ -215,6 +215,23 @@ func applyDefaults(cfg *Config) {
 	if cfg.Email.Auth == "" {
 		cfg.Email.Auth = AuthPassword
 	}
+	for i := range cfg.Email.Mailboxes {
+		applyMailboxDefaults(&cfg.Email.Mailboxes[i])
+	}
+}
+
+// applyMailboxDefaults fills the zero values of one mailbox of the mailboxes list.
+func applyMailboxDefaults(mb *MailboxConfig) {
+	if mb.IMAPPort == 0 {
+		mb.IMAPPort = 993
+	}
+	if mb.IMAPDomains == nil {
+		// The API contract promises an array, and a nil slice encodes as JSON null.
+		mb.IMAPDomains = []string{}
+	}
+	if mb.Auth == "" {
+		mb.Auth = AuthPassword
+	}
 }
 
 // Validate checks cfg for invalid values. It fills no default, so a caller
@@ -239,51 +256,98 @@ func Validate(cfg *Config) error {
 
 	errs = append(errs, validateConcurrency(cfg.Concurrency)...)
 
-	// Email
-	if cfg.Email.IMAPPort < 1 || cfg.Email.IMAPPort > 65535 {
-		errs = append(errs, fmt.Errorf("email.imap_port must be between 1 and 65535, got %d", cfg.Email.IMAPPort))
+	errs = append(errs, validateEmail("email.", cfg.Email.Mailbox())...)
+	errs = append(errs, validateMailboxes(cfg.Email.Mailboxes)...)
+	if limit, ok := AccountLimit(cfg.Email); ok && cfg.Concurrency.AccountCount > limit {
+		errs = append(errs, fmt.Errorf("concurrency.account_count must not exceed %d, the count of the mailboxes, "+
+			"because a mailbox with no imap_domains makes one account, at its own address, got %d", limit, cfg.Concurrency.AccountCount))
 	}
-	if cfg.Email.IMAPHost == "" {
-		errs = append(errs, errors.New("email.imap_host is required"))
-	}
-	if cfg.Email.IMAPUser == "" {
-		errs = append(errs, errors.New("email.imap_user is required"))
-	}
-	errs = append(errs, validateAuth(cfg.Email)...)
-	errs = append(errs, validateDomains(cfg.Email.IMAPDomains)...)
 
 	return errors.Join(errs...)
 }
 
-// validateAuth checks the login fields of the email section. The fields that it requires depend on auth.
-func validateAuth(e EmailConfig) []error {
-	switch e.Auth {
-	case AuthPassword:
-		if e.IMAPPass == "" {
-			return []error{errors.New("email.imap_pass is required")}
-		}
-		return nil
-	case AuthOAuth2:
-		return validateOAuth2(e.OAuth2)
-	default:
-		return []error{fmt.Errorf("email.auth must be %q or %q, got %q", AuthPassword, AuthOAuth2, e.Auth)}
+// AccountLimit returns the most accounts that the mailboxes of e can make, and
+// false when they have no limit. The mailboxes are email.mailboxes, or e itself
+// when that list is empty. A mailbox with no imap_domains makes one account, at
+// its own address. A mailbox with domains makes any number, so it lifts the limit.
+func AccountLimit(e EmailConfig) (int, bool) {
+	if len(e.Mailboxes) == 0 {
+		return 1, len(e.IMAPDomains) == 0
 	}
+	for _, mb := range e.Mailboxes {
+		if len(mb.IMAPDomains) > 0 {
+			return 0, false
+		}
+	}
+	return len(e.Mailboxes), true
 }
 
-// validateOAuth2 checks the oauth2 section of an email section whose auth is AuthOAuth2.
+// validateMailboxes checks each entry of email.mailboxes as an email section.
+// Two entries with no imap_domains must not share an address, because each makes one account there.
+func validateMailboxes(mailboxes []MailboxConfig) []error {
+	var errs []error
+	seen := map[string]int{}
+	for k, mb := range mailboxes {
+		errs = append(errs, validateEmail(fmt.Sprintf("email.mailboxes[%d].", k), mb)...)
+		if len(mb.IMAPDomains) > 0 || mb.IMAPUser == "" {
+			continue
+		}
+		key := strings.ToLower(mb.IMAPUser)
+		if first, ok := seen[key]; ok {
+			errs = append(errs, fmt.Errorf("email.mailboxes[%d].imap_user repeats the address of email.mailboxes[%d], %q", k, first, mb.IMAPUser))
+			continue
+		}
+		seen[key] = k
+	}
+	return errs
+}
+
+// validateEmail checks one mailbox: the email section or an entry of email.mailboxes.
+// The login fields that it requires depend on auth. Empty imap_domains means the one
+// account of the mailbox takes the address of imap_user, so imap_user must then be one.
+// prefix names the mailbox in each error, for example "email.".
+func validateEmail(prefix string, m MailboxConfig) []error {
+	var errs []error
+	if m.IMAPPort < 1 || m.IMAPPort > 65535 {
+		errs = append(errs, fmt.Errorf("%simap_port must be between 1 and 65535, got %d", prefix, m.IMAPPort))
+	}
+	if m.IMAPHost == "" {
+		errs = append(errs, errors.New(prefix+"imap_host is required"))
+	}
+	switch {
+	case m.IMAPUser == "":
+		errs = append(errs, errors.New(prefix+"imap_user is required"))
+	case len(m.IMAPDomains) == 0 && !strings.Contains(m.IMAPUser, "@"):
+		errs = append(errs, fmt.Errorf("%simap_user must be an email address when %simap_domains is empty, got %q", prefix, prefix, m.IMAPUser))
+	}
+	switch m.Auth {
+	case AuthPassword:
+		if m.IMAPPass == "" {
+			errs = append(errs, errors.New(prefix+"imap_pass is required"))
+		}
+	case AuthOAuth2:
+		errs = append(errs, validateOAuth2(prefix+"oauth2.", m.OAuth2)...)
+	default:
+		errs = append(errs, fmt.Errorf("%sauth must be %q or %q, got %q", prefix, AuthPassword, AuthOAuth2, m.Auth))
+	}
+	return append(errs, validateDomains(prefix+"imap_domains", m.IMAPDomains)...)
+}
+
+// validateOAuth2 checks the oauth2 section of a mailbox whose auth is AuthOAuth2.
 // The client secret is optional, because a public client has none.
-func validateOAuth2(o OAuth2Config) []error {
+// prefix names the section in each error, for example "email.oauth2.".
+func validateOAuth2(prefix string, o OAuth2Config) []error {
 	var errs []error
 	if o.ClientID == "" {
-		errs = append(errs, errors.New("email.oauth2.client_id is required"))
+		errs = append(errs, errors.New(prefix+"client_id is required"))
 	}
 	if o.RefreshToken == "" {
-		errs = append(errs, errors.New("email.oauth2.refresh_token is required"))
+		errs = append(errs, errors.New(prefix+"refresh_token is required"))
 	}
 	if o.TokenURL == "" {
-		errs = append(errs, errors.New("email.oauth2.token_url is required"))
+		errs = append(errs, errors.New(prefix+"token_url is required"))
 	} else if u, err := url.Parse(o.TokenURL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-		errs = append(errs, fmt.Errorf("email.oauth2.token_url must be an http or https URL, got %q", o.TokenURL))
+		errs = append(errs, fmt.Errorf("%stoken_url must be an http or https URL, got %q", prefix, o.TokenURL))
 	}
 	return errs
 }
@@ -291,20 +355,18 @@ func validateOAuth2(o OAuth2Config) []error {
 // asciiLetters are the letters that the last label of a domain must hold one of.
 const asciiLetters = "abcdefghijklmnopqrstuvwxyz"
 
-// validateDomains checks the domain list. Each entry gets at most one error. The
-// repeat check reads only the valid entries and ignores case.
-func validateDomains(domains []string) []error {
-	if len(domains) == 0 {
-		return []error{errors.New("email.imap_domains is required")}
-	}
+// validateDomains checks the domain list that key names. An empty list is valid:
+// the mailbox then makes one account, at its own address. Each entry gets at most
+// one error. The repeat check reads only the valid entries and ignores case.
+func validateDomains(key string, domains []string) []error {
 	var errs []error
 	var valid []int
 	for i, d := range domains {
 		switch {
 		case strings.TrimSpace(d) == "":
-			errs = append(errs, fmt.Errorf("email.imap_domains[%d] is empty", i))
+			errs = append(errs, fmt.Errorf("%s[%d] is empty", key, i))
 		case !validDomain(d):
-			errs = append(errs, fmt.Errorf("email.imap_domains[%d] %q is not a valid domain name", i, d))
+			errs = append(errs, fmt.Errorf("%s[%d] %q is not a valid domain name", key, i, d))
 		default:
 			valid = append(valid, i)
 		}
@@ -313,7 +375,7 @@ func validateDomains(domains []string) []error {
 	for _, j := range valid {
 		lower := strings.ToLower(domains[j])
 		if i, ok := first[lower]; ok {
-			errs = append(errs, fmt.Errorf("email.imap_domains[%d] %q repeats [%d]", j, domains[j], i))
+			errs = append(errs, fmt.Errorf("%s[%d] %q repeats [%d]", key, j, domains[j], i))
 			continue
 		}
 		first[lower] = j

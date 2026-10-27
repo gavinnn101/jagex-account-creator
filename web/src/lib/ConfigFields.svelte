@@ -8,6 +8,8 @@
   } from '#lib/digest.ts';
   import { editedConfig } from '#lib/run/edited.ts';
   import MailboxCheck from '#lib/run/MailboxCheck.svelte';
+  import MailboxPaste from '#lib/run/MailboxPaste.svelte';
+  import { removeMailboxes } from '#lib/run/pasted.svelte.ts';
   import Checkbox from '#lib/ui/Checkbox.svelte';
   import Details from '#lib/ui/Details.svelte';
   import Field from '#lib/ui/Field.svelte';
@@ -137,6 +139,7 @@
 
   <Details summary="Mailbox" digest={mailboxDigest(config)}>
     <div class="flex flex-col gap-gap">
+      <MailboxPaste {fetch} />
       <div class="grid gap-gap sm:grid-cols-2 lg:grid-cols-4">
         <Field label="IMAP host" bind:value={config.email.imap_host} />
         <Field
@@ -184,14 +187,20 @@
         <div class="sm:col-span-2 lg:col-span-4">
           <TextArea
             label="IMAP domains"
-            hint="One domain per line. Each account takes one at random."
+            hint="One domain per line. Each account takes one at random. Empty: one account, at the IMAP user."
             rows={3}
             spellcheck={false}
             bind:value={getDomains, setDomains}
           />
         </div>
       </div>
-      <MailboxCheck email={config.email} {fetch} />
+      <MailboxCheck
+        email={config.email}
+        {fetch}
+        onremove={(users: string[]) => {
+          removeMailboxes(config.email, users);
+        }}
+      />
     </div>
   </Details>
 
