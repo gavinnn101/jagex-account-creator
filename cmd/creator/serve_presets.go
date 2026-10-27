@@ -77,9 +77,11 @@ func (s *apiServer) DeletePreset(ctx context.Context, r api.DeletePresetRequestO
 }
 
 // presetAnswer returns the API form of p with the config c. The row keeps the
-// stored form of runs.config, but database and imap_pass_set describe serve,
-// not the preset, so they come from serve, the API form of the config of serve.
+// stored form of runs.config, but database and the set flags of the email
+// secrets describe serve, not the preset, so they come from serve, the API form
+// of the config of serve.
 func presetAnswer(p *store.Preset, c, serve api.Config) api.Preset {
 	c.Database, c.Email.ImapPassSet = serve.Database, serve.Email.ImapPassSet
+	c.Email.Oauth2.ClientSecretSet, c.Email.Oauth2.RefreshTokenSet = serve.Email.Oauth2.ClientSecretSet, serve.Email.Oauth2.RefreshTokenSet
 	return api.Preset{Id: p.ID, Name: p.Name, SavedAt: p.SavedAt, Config: c}
 }

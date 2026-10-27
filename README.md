@@ -37,7 +37,7 @@ The binary embeds the dashboard. After a change in `web/src`, build the dashboar
 ## Quick start
 
 1. Copy the template: `cp config.yaml config.local.yaml`.
-2. In `config.local.yaml`, set `email.imap_host`, `email.imap_user`, `email.imap_pass` and `email.imap_domains`.
+2. In `config.local.yaml`, set `email.imap_host`, `email.imap_user`, `email.imap_domains` and the login: `email.imap_pass`, or the `email.oauth2` keys with `email.auth: oauth2` (see [Mailbox login](#mailbox-login-password-or-oauth2)).
 3. Start serve mode: `./creator -mode serve`.
 4. Open http://127.0.0.1:8080.
 5. On the **Proxies** screen, open "Import proxies". Paste your proxy lines or pick a file, then click Import.
@@ -56,7 +56,7 @@ The keys to set:
 | --------------------------- | -------------------------------------------------------------------------------------- |
 | `email.imap_host`           | The IMAP server, for example `imap.example.com`                                        |
 | `email.imap_user`           | The login of the mailbox                                                               |
-| `email.imap_pass`           | The password of the mailbox                                                            |
+| `email.imap_pass`           | The password of the mailbox, when `email.auth` is `password`                           |
 | `email.imap_domains`        | The list of the domains of the new addresses, for example `[example.com, example.org]` |
 | `database`                  | The path of the SQLite database. The default is `creator.db`                           |
 | `proxy.direct`              | `true` runs with no proxy and ignores the proxy list                                   |
@@ -64,6 +64,24 @@ The keys to set:
 | `concurrency.account_count` | The number of accounts to create. `-1` is no limit                                     |
 
 Each entry of `email.imap_domains` is an ASCII domain name with at least one dot, in any case, and no entry repeats. Write a non-ASCII domain in its `xn--` form.
+
+### Mailbox login: password or OAuth2
+
+`email.auth` picks how the run logs in to the mailbox:
+
+- `password`, the default: logs in with `email.imap_pass`, the mailbox password or an app password.
+- `oauth2`: logs in with XOAUTH2, as Gmail and Outlook allow. Set `email.oauth2.client_id`, `email.oauth2.refresh_token` and `email.oauth2.token_url`. Set `email.oauth2.client_secret` only when the app has one. Each IMAP login trades the refresh token for an access token at the token endpoint, and reuses that token until it expires.
+
+| Provider | IMAP host               | Token URL                                                    |
+| -------- | ----------------------- | ------------------------------------------------------------ |
+| Outlook  | `outlook.office365.com` | `https://login.microsoftonline.com/common/oauth2/v2.0/token` |
+| Gmail    | `imap.gmail.com`        | `https://oauth2.googleapis.com/token`                        |
+
+A token endpoint that refuses the client or the refresh token (`invalid_grant`, `invalid_client`, `invalid_scope` or `unauthorized_client`) fails the login as a wrong password does. Any other token error, such as a timeout, counts as a failed connection, so the wait for a verification code tries again.
+
+The dashboard never shows a saved password, client secret or refresh token. Leave the field empty to keep the saved one. Presets and the run history never store them.
+
+Limitation: a token endpoint that rotates the refresh token returns a new one that the config never stores. Google and Microsoft keep the old one valid, so this matters only for a provider that revokes it.
 
 ## CLI use
 

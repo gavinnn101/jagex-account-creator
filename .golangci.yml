@@ -70,6 +70,8 @@ linters:
             # The generated API server binds its path and query parameters with it.
             - github.com/oapi-codegen/runtime
             - github.com/sardanioss/httpcloak
+            # The XOAUTH2 login of the mailbox gets its access tokens with the refresh-token grant.
+            - golang.org/x/oauth2
             # The wire test uses its HTTP/2 frame reader. The forward proxy uses its SOCKS5 client.
             - golang.org/x/net
             - golang.org/x/sync
@@ -90,6 +92,8 @@ linters:
             # The local API server of serve mode. A deny entry matches by prefix, so net/http also denies
             # net/http/httptest. Keep the glob wide enough for serve_test.go and serve_api_test.go.
             - "!**/cmd/creator/serve*.go"
+            # The test fakes the OAuth2 token endpoint. The refresh itself goes through golang.org/x/oauth2, as the IMAP login goes direct.
+            - "!**/cmd/creator/emailauth_test.go"
           deny:
             - pkg: net/http
               desc: external requests use httpcloak. Only the forward proxy, its test fake and the local API server of serve mode use net/http.

@@ -32,6 +32,8 @@ const config: Config = {
     imap_user: '',
     imap_pass_set: false,
     imap_domains: [],
+    auth: 'password',
+    oauth2: { client_id: '', client_secret_set: false, refresh_token_set: false, token_url: '' },
   },
   account: { password_length: 16, enable_totp: true },
   concurrency: { max_workers: 1, max_browsers: 1, account_count: 1, account_timeout: '1m' },

@@ -21,6 +21,8 @@ const config: Config = {
     imap_user: 'user@example.com',
     imap_pass: 'secret',
     imap_domains: ['example.com'],
+    auth: 'password',
+    oauth2: { client_id: '', token_url: '' },
   },
   account: { password_length: 16, enable_totp: true },
   concurrency: { max_workers: 1, max_browsers: 1, account_count: 1, account_timeout: '1m' },

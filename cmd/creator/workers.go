@@ -13,7 +13,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"jagex_account_creator/internal/config"
 	"jagex_account_creator/internal/email"
 	"jagex_account_creator/internal/proxy"
 )
@@ -92,7 +91,7 @@ func (r *runner) startWorkers(ctx context.Context, g *errgroup.Group, logger *sl
 		g.Go(func() error {
 			defer ws.idle()
 			// Each worker gets its own email provider, so the provider's log lines carry the worker.
-			emailProvider := newEmailProvider(r.cfg, workerLog)
+			emailProvider := newEmailProvider(ctx, r.cfg, workerLog)
 
 			return loop(ctx, workerLog, ws, func(ctx context.Context, logger *slog.Logger) error {
 				// The proxy wait and the slot wait come before the per-account timeout, so they take no time from the attempt.
@@ -251,16 +250,5 @@ func attemptAccount(ctx context.Context, logger *slog.Logger, ws workerState, ac
 		if bo.sleep(ctx, logger, delay, failures) != nil {
 			return true, ctx.Err()
 		}
-	}
-}
-
-// newEmailProvider builds an IMAP provider from config.
-func newEmailProvider(cfg *config.Config, logger *slog.Logger) *email.IMAPProvider {
-	return &email.IMAPProvider{
-		Host:   cfg.Email.IMAPHost,
-		Port:   cfg.Email.IMAPPort,
-		User:   cfg.Email.IMAPUser,
-		Pass:   cfg.Email.IMAPPass,
-		Logger: logger.With("component", "email"),
 	}
 }

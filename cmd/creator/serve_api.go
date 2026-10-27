@@ -108,13 +108,13 @@ func validateResponse(c api.Config, stored *config.Config) api.ValidateConfigRes
 }
 
 // validatePosted returns the config form of c and its validation result, for a
-// serve that read stored. An absent imap_pass takes the password of stored.
+// serve that read stored. An absent secret takes the secret of stored.
 // configFromAPI fills no default. The database must be the database of stored,
 // because serve shows the history of that database only. The error names a
 // value that does not parse.
 // Limitation: the check compares the paths after filepath.Clean, so two spellings of one file get a refusal. It fails toward a refusal.
 func validatePosted(c api.Config, stored *config.Config) (*config.Config, api.ValidationResult, error) {
-	cfg, err := configFromAPI(c, stored.Email.IMAPPass)
+	cfg, err := configFromAPI(c, stored.Email)
 	if err != nil {
 		return nil, api.ValidationResult{}, err
 	}
@@ -154,7 +154,7 @@ func chromeCheck(ctx context.Context) api.ChromeCheck {
 // CheckMailbox logs in to the mailbox of the posted email section.
 func (s *apiServer) CheckMailbox(ctx context.Context, r api.CheckMailboxRequestObject) (api.CheckMailboxResponseObject, error) {
 	cfg := *s.config()
-	cfg.Email = emailFromAPI(*r.Body, cfg.Email.IMAPPass)
+	cfg.Email = emailFromAPI(*r.Body, cfg.Email)
 	result := api.MailboxCheck{Ok: true}
 	if err := s.checkLogin(ctx, &cfg); err != nil {
 		result = api.MailboxCheck{Error: new(err.Error())}
@@ -167,10 +167,10 @@ func (s *apiServer) checkLogin(ctx context.Context, cfg *config.Config) error {
 	if s.checkLoginFn != nil {
 		return s.checkLoginFn(ctx, cfg)
 	}
-	return newEmailProvider(cfg, s.logger).CheckLogin(ctx)
+	return newEmailProvider(ctx, cfg, s.logger).CheckLogin(ctx)
 }
 
-// apiConfig returns the API form of cfg. In place of the IMAP password, it tells whether cfg holds one.
+// apiConfig returns the API form of cfg. In place of each email secret, it tells whether cfg holds one.
 func apiConfig(cfg *config.Config) api.Config {
 	return api.Config{
 		Debug:    cfg.Debug,
@@ -183,6 +183,13 @@ func apiConfig(cfg *config.Config) api.Config {
 			ImapUser:    cfg.Email.IMAPUser,
 			ImapPassSet: new(cfg.Email.IMAPPass != ""),
 			ImapDomains: cfg.Email.IMAPDomains,
+			Auth:        api.EmailConfigAuth(cfg.Email.Auth),
+			Oauth2: api.OAuth2Config{
+				ClientId:        cfg.Email.OAuth2.ClientID,
+				ClientSecretSet: new(cfg.Email.OAuth2.ClientSecret != ""),
+				RefreshTokenSet: new(cfg.Email.OAuth2.RefreshToken != ""),
+				TokenUrl:        cfg.Email.OAuth2.TokenURL,
+			},
 		},
 		Account: api.AccountConfig{PasswordLength: cfg.Account.PasswordLength, EnableTotp: *cfg.Account.EnableTOTP},
 		Concurrency: api.ConcurrencyConfig{
@@ -194,14 +201,14 @@ func apiConfig(cfg *config.Config) api.Config {
 	}
 }
 
-// configJSON returns the stored form of cfg: the JSON of apiConfig, so it holds no IMAP password.
+// configJSON returns the stored form of cfg: the JSON of apiConfig, so it holds no email secret.
 func configJSON(cfg *config.Config) json.RawMessage {
 	text, _ := json.Marshal(apiConfig(cfg)) //nolint:errchkjson // Unreachable: api.Config holds only bools, ints, strings, a string list and pointers to them.
 	return text
 }
 
-// configFromAPI returns the config form of c. An absent imap_pass takes storedPass.
-func configFromAPI(c api.Config, storedPass string) (*config.Config, error) {
+// configFromAPI returns the config form of c. An absent secret takes the secret of stored.
+func configFromAPI(c api.Config, stored config.EmailConfig) (*config.Config, error) {
 	chromeTimeout, err := time.ParseDuration(c.Chrome.Timeout)
 	if err != nil {
 		return nil, fmt.Errorf("chrome.timeout: %w", err)
@@ -215,7 +222,7 @@ func configFromAPI(c api.Config, storedPass string) (*config.Config, error) {
 		Database: c.Database,
 		Chrome:   config.ChromeConfig{Headless: new(c.Chrome.Headless), Timeout: chromeTimeout},
 		Proxy:    config.ProxyConfig{Direct: c.Proxy.Direct},
-		Email:    emailFromAPI(c.Email, storedPass),
+		Email:    emailFromAPI(c.Email, stored),
 		Account:  config.AccountConfig{PasswordLength: c.Account.PasswordLength, EnableTOTP: new(c.Account.EnableTotp)},
 		Concurrency: config.ConcurrencyConfig{
 			MaxWorkers:     c.Concurrency.MaxWorkers,
@@ -226,13 +233,31 @@ func configFromAPI(c api.Config, storedPass string) (*config.Config, error) {
 	}, nil
 }
 
-// emailFromAPI returns the config form of e. An absent imap_pass takes storedPass.
-func emailFromAPI(e api.EmailConfig, storedPass string) config.EmailConfig {
-	pass := storedPass
-	if e.ImapPass != nil {
-		pass = *e.ImapPass
+// emailFromAPI returns the config form of e. An absent imap_pass, client_secret
+// or refresh_token takes the one of stored.
+func emailFromAPI(e api.EmailConfig, stored config.EmailConfig) config.EmailConfig {
+	return config.EmailConfig{
+		IMAPHost:    e.ImapHost,
+		IMAPPort:    e.ImapPort,
+		IMAPUser:    e.ImapUser,
+		IMAPPass:    orStored(e.ImapPass, stored.IMAPPass),
+		IMAPDomains: e.ImapDomains,
+		Auth:        string(e.Auth),
+		OAuth2: config.OAuth2Config{
+			ClientID:     e.Oauth2.ClientId,
+			ClientSecret: orStored(e.Oauth2.ClientSecret, stored.OAuth2.ClientSecret),
+			RefreshToken: orStored(e.Oauth2.RefreshToken, stored.OAuth2.RefreshToken),
+			TokenURL:     e.Oauth2.TokenUrl,
+		},
 	}
-	return config.EmailConfig{IMAPHost: e.ImapHost, IMAPPort: e.ImapPort, IMAPUser: e.ImapUser, IMAPPass: pass, IMAPDomains: e.ImapDomains}
+}
+
+// orStored returns the posted secret, or stored when the post left it out.
+func orStored(secret *string, stored string) string {
+	if secret == nil {
+		return stored
+	}
+	return *secret
 }
 
 // errorMessages returns one message for each error that err joins.

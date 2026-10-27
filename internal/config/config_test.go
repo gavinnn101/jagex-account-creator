@@ -517,12 +517,81 @@ func TestValidateIMAPRequiredFields(t *testing.T) {
 			applyDefaults(cfg)
 			cfg.Email = tt.cfg       // restore test values after defaults
 			cfg.Email.IMAPPort = 993 // avoid port error
+			cfg.Email.Auth = AuthPassword
 			err := Validate(cfg)
 			if err == nil {
 				t.Fatal("expected validation error")
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("expected error to mention %q, got: %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestDefaultAuth(t *testing.T) {
+	cfg := &Config{}
+	applyDefaults(cfg)
+	if cfg.Email.Auth != AuthPassword {
+		t.Errorf("Email.Auth = %q, want %q", cfg.Email.Auth, AuthPassword)
+	}
+	cfg = &Config{Email: EmailConfig{Auth: AuthOAuth2}}
+	applyDefaults(cfg)
+	if cfg.Email.Auth != AuthOAuth2 {
+		t.Errorf("Email.Auth = %q, want %q (explicit)", cfg.Email.Auth, AuthOAuth2)
+	}
+}
+
+// validOAuth2 returns a complete oauth2 section of a confidential client.
+func validOAuth2() OAuth2Config {
+	return OAuth2Config{ClientID: "client", ClientSecret: "secret", RefreshToken: "refresh", TokenURL: "https://oauth2.example.com/token"}
+}
+
+func TestValidateAuth(t *testing.T) {
+	const urlErr = "email.oauth2.token_url must be an http or https URL, got "
+	// oauth2 sets auth oauth2 with a complete section, and then edit.
+	oauth2 := func(edit func(*OAuth2Config)) func(*EmailConfig) {
+		return func(e *EmailConfig) {
+			e.Auth, e.IMAPPass, e.OAuth2 = AuthOAuth2, "", validOAuth2()
+			edit(&e.OAuth2)
+		}
+	}
+	tests := []struct {
+		name    string
+		set     func(*EmailConfig)
+		wantErr string // empty means valid
+	}{
+		{"password with a password", func(*EmailConfig) {}, ""},
+		{"password with no password", func(e *EmailConfig) { e.IMAPPass = "" }, "email.imap_pass is required"},
+		{"oauth2 complete", oauth2(func(*OAuth2Config) {}), ""},
+		{"oauth2 of a public client", oauth2(func(o *OAuth2Config) { o.ClientSecret = "" }), ""},
+		{"oauth2 over http", oauth2(func(o *OAuth2Config) { o.TokenURL = "http://127.0.0.1:8080/token" }), ""},
+		{"oauth2 with no client_id", oauth2(func(o *OAuth2Config) { o.ClientID = "" }), "email.oauth2.client_id is required"},
+		{"oauth2 with no refresh_token", oauth2(func(o *OAuth2Config) { o.RefreshToken = "" }), "email.oauth2.refresh_token is required"},
+		{"oauth2 with no token_url", oauth2(func(o *OAuth2Config) { o.TokenURL = "" }), "email.oauth2.token_url is required"},
+		{"oauth2 with a token_url of another scheme", oauth2(func(o *OAuth2Config) { o.TokenURL = "ftp://oauth2.example.com/token" }),
+			urlErr + `"ftp://oauth2.example.com/token"`},
+		{"oauth2 with a token_url of no host", oauth2(func(o *OAuth2Config) { o.TokenURL = "https:///token" }), urlErr + `"https:///token"`},
+		{"oauth2 with a token_url that does not parse", oauth2(func(o *OAuth2Config) { o.TokenURL = "https://oauth2.example.com/%zz" }),
+			urlErr + `"https://oauth2.example.com/%zz"`},
+		{"oauth2 with an empty section", oauth2(func(o *OAuth2Config) { *o = OAuth2Config{} }),
+			"email.oauth2.client_id is required\nemail.oauth2.refresh_token is required\nemail.oauth2.token_url is required"},
+		{"an unknown auth", func(e *EmailConfig) { e.Auth = "plain" }, `email.auth must be "password" or "oauth2", got "plain"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{Email: validEmail()}
+			applyDefaults(cfg)
+			tt.set(&cfg.Email)
+			err := Validate(cfg)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected valid config, got: %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("Validate error = %v, want exactly %q", err, tt.wantErr)
 			}
 		})
 	}

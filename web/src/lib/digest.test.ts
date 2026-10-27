@@ -57,6 +57,19 @@ describe('mailboxDigest', () => {
     expect(mailboxDigest(config)).toBe('user@example.com at mail.example.com:993');
   });
 
+  it('marks an OAuth2 login with no secret in the text', () => {
+    const oauth2 = withEmail({
+      auth: 'oauth2',
+      oauth2: {
+        client_id: 'client',
+        client_secret: 'secret-client',
+        refresh_token: 'secret-refresh',
+        token_url: '',
+      },
+    });
+    expect(mailboxDigest(oauth2)).toBe('user@example.com at mail.example.com:993, OAuth2');
+  });
+
   it.for<[string, Partial<Config['email']>]>([
     ['no user', { imap_user: '' }],
     ['no host', { imap_host: '' }],

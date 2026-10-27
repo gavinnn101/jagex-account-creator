@@ -155,6 +155,13 @@ describe('ConfigFields', () => {
         imap_user: 'other@example.org',
         imap_pass_set: false,
         imap_domains: ['example.org'],
+        auth: 'password',
+        oauth2: {
+          client_id: '',
+          client_secret_set: false,
+          refresh_token_set: false,
+          token_url: '',
+        },
       },
       account: { password_length: 20, enable_totp: false },
       concurrency: { max_workers: 3, max_browsers: 0, account_count: -1, account_timeout: '2m' },
@@ -237,6 +244,55 @@ describe('ConfigFields', () => {
     await domains.fill('a.example\n');
     config.email.imap_domains = ['c.example', 'd.example'];
     await expect.element(domains).toHaveValue('c.example\nd.example');
+  });
+
+  it('shows the OAuth2 fields in place of the password for an OAuth2 login', async () => {
+    const { screen, config } = await renderFields(saved(true));
+    await openAll(screen);
+    const login = screen.getByLabelText('Login');
+    await expect.element(login).toHaveValue('password');
+    await expect.element(screen.getByLabelText('Client ID')).not.toBeInTheDocument();
+
+    await login.selectOptions('oauth2');
+    expect(config.email.auth).toBe('oauth2');
+    await expect.element(screen.getByLabelText('IMAP password')).not.toBeInTheDocument();
+    await screen.getByLabelText('Client ID').fill('client');
+    await screen.getByLabelText('Token URL').fill('https://oauth2.example.com/token');
+    expect(config.email.oauth2).toMatchObject({
+      client_id: 'client',
+      token_url: 'https://oauth2.example.com/token',
+    });
+    await expect
+      .element(screen.getByLabelText('Client secret'))
+      .toHaveAccessibleDescription('Empty for a public client.');
+    expect(sections(screen)[1]?.[2]).toBe('user@example.com at mail.example.com:993, OAuth2');
+
+    await login.selectOptions('password');
+    await expect.element(screen.getByLabelText('IMAP password')).toBeVisible();
+    expect(config.email.oauth2.client_id).toBe('client');
+  });
+
+  it('sends a typed OAuth2 secret and no secret for an empty field', async () => {
+    const initial = configFixture();
+    initial.email.auth = 'oauth2';
+    initial.email.oauth2 = { ...initial.email.oauth2, client_secret_set: true };
+    const { screen, config } = await renderFields(initial);
+    await openAll(screen);
+    const secret = screen.getByLabelText('Client secret');
+    const refresh = screen.getByLabelText('Refresh token');
+    await expect.element(secret).toHaveAttribute('placeholder', 'Stored. Empty keeps it.');
+    await expect.element(refresh).not.toHaveAttribute('placeholder');
+    for (const [field, key] of [
+      [secret, 'client_secret'],
+      [refresh, 'refresh_token'],
+    ] as const) {
+      await expect.element(field).toHaveAttribute('type', 'password');
+      expect(key in config.email.oauth2).toBe(false);
+      await field.fill('typed');
+      expect(config.email.oauth2[key]).toBe('typed');
+      await field.fill('');
+      expect(key in config.email.oauth2).toBe(false);
+    }
   });
 
   it('checks the mailbox with the edited email section', async () => {

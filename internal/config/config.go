@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -211,6 +212,9 @@ func applyDefaults(cfg *Config) {
 		// The API contract promises an array, and a nil slice encodes as JSON null.
 		cfg.Email.IMAPDomains = []string{}
 	}
+	if cfg.Email.Auth == "" {
+		cfg.Email.Auth = AuthPassword
+	}
 }
 
 // Validate checks cfg for invalid values. It fills no default, so a caller
@@ -245,12 +249,43 @@ func Validate(cfg *Config) error {
 	if cfg.Email.IMAPUser == "" {
 		errs = append(errs, errors.New("email.imap_user is required"))
 	}
-	if cfg.Email.IMAPPass == "" {
-		errs = append(errs, errors.New("email.imap_pass is required"))
-	}
+	errs = append(errs, validateAuth(cfg.Email)...)
 	errs = append(errs, validateDomains(cfg.Email.IMAPDomains)...)
 
 	return errors.Join(errs...)
+}
+
+// validateAuth checks the login fields of the email section. The fields that it requires depend on auth.
+func validateAuth(e EmailConfig) []error {
+	switch e.Auth {
+	case AuthPassword:
+		if e.IMAPPass == "" {
+			return []error{errors.New("email.imap_pass is required")}
+		}
+		return nil
+	case AuthOAuth2:
+		return validateOAuth2(e.OAuth2)
+	default:
+		return []error{fmt.Errorf("email.auth must be %q or %q, got %q", AuthPassword, AuthOAuth2, e.Auth)}
+	}
+}
+
+// validateOAuth2 checks the oauth2 section of an email section whose auth is AuthOAuth2.
+// The client secret is optional, because a public client has none.
+func validateOAuth2(o OAuth2Config) []error {
+	var errs []error
+	if o.ClientID == "" {
+		errs = append(errs, errors.New("email.oauth2.client_id is required"))
+	}
+	if o.RefreshToken == "" {
+		errs = append(errs, errors.New("email.oauth2.refresh_token is required"))
+	}
+	if o.TokenURL == "" {
+		errs = append(errs, errors.New("email.oauth2.token_url is required"))
+	} else if u, err := url.Parse(o.TokenURL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		errs = append(errs, fmt.Errorf("email.oauth2.token_url must be an http or https URL, got %q", o.TokenURL))
+	}
+	return errs
 }
 
 // asciiLetters are the letters that the last label of a domain must hold one of.

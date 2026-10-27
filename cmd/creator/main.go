@@ -210,7 +210,7 @@ func runCLI(ctx context.Context, stopNow <-chan struct{}, logger *slog.Logger, l
 // run creates the accounts of cfg. The workers mark their progress on state,
 // which is nil in the CLI. Each attempt saves its account and its row to history.
 func run(ctx context.Context, stopNow <-chan struct{}, logger *slog.Logger, cfg *config.Config, state *runState, history runHistory) error { // coverage-ignore: needs a live Chrome
-	if err := newEmailProvider(cfg, logger).CheckLogin(ctx); err != nil {
+	if err := newEmailProvider(ctx, cfg, logger).CheckLogin(ctx); err != nil {
 		return fmt.Errorf("checking the mailbox: %w", err)
 	}
 

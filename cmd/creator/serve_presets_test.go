@@ -43,7 +43,7 @@ func postedPresetConfig(t *testing.T, s *apiServer, edit func(*api.Config)) *con
 	t.Helper()
 	c := apiConfig(s.config())
 	edit(&c)
-	cfg, err := configFromAPI(c, s.config().Email.IMAPPass)
+	cfg, err := configFromAPI(c, s.config().Email)
 	if err != nil {
 		t.Fatal(err)
 	}

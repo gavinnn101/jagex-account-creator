@@ -29,7 +29,8 @@ func savedConfig() *Config {
 		Chrome:   ChromeConfig{Headless: new(false), Timeout: 45 * time.Second},
 		Proxy:    ProxyConfig{Direct: true},
 		Email: EmailConfig{IMAPHost: "mail.example.com", IMAPPort: 143, IMAPUser: "123",
-			IMAPPass: `p@ss: wo#rd "x" 'y'`, IMAPDomains: []string{"example.com", "example.org"}},
+			IMAPPass: `p@ss: wo#rd "x" 'y'`, IMAPDomains: []string{"example.com", "example.org"}, Auth: AuthOAuth2,
+			OAuth2: OAuth2Config{ClientID: "client", ClientSecret: "secret", RefreshToken: "refresh", TokenURL: "https://oauth2.example.com/token"}},
 		Account:     AccountConfig{PasswordLength: 20, EnableTOTP: new(false)},
 		Concurrency: ConcurrencyConfig{MaxWorkers: 4, MaxBrowsers: 2, AccountCount: -1, AccountTimeout: 90 * time.Second},
 	}
@@ -41,7 +42,9 @@ const (
 	savedChrome = "chrome:\n  headless: false\n  timeout: 45s\n"
 	savedProxy  = "proxy:\n  direct: true\n"
 	savedEmail  = "  imap_host: mail.example.com\n  imap_port: 143\n  imap_user: \"123\"\n" +
-		"  imap_pass: 'p@ss: wo#rd \"x\" ''y'''\n  imap_domains:\n    - example.com\n    - example.org\n"
+		"  imap_pass: 'p@ss: wo#rd \"x\" ''y'''\n  imap_domains:\n    - example.com\n    - example.org\n  auth: oauth2\n" +
+		"  oauth2:\n    client_id: client\n    client_secret: secret\n    refresh_token: refresh\n" +
+		"    token_url: https://oauth2.example.com/token\n"
 	savedRest = "account:\n  password_length: 20\n  enable_totp: false\n" +
 		"concurrency:\n  max_workers: 4\n  max_browsers: 2\n  account_count: -1\n  account_timeout: 1m30s\n"
 	savedAll = savedTop + savedChrome + savedProxy + "email:\n" + savedEmail + savedRest

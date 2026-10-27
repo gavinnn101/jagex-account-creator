@@ -11,6 +11,8 @@ const email: EmailConfig = {
   imap_user: 'user@example.com',
   imap_pass: 'secret',
   imap_domains: ['example.com'],
+  auth: 'password',
+  oauth2: { client_id: '', token_url: '' },
 };
 
 interface Sent {

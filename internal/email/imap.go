@@ -15,6 +15,7 @@ import (
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
+	"golang.org/x/oauth2"
 )
 
 // verificationCodeRe matches the Jagex registration verification code in the email HTML.
@@ -25,10 +26,16 @@ var verificationCodeRe = regexp.MustCompile(
 // IMAPProvider implements Provider using an IMAP mailbox.
 // Each wait opens its own IMAP connection, so the provider is safe for concurrent use.
 type IMAPProvider struct {
-	Host         string // IMAP server hostname
-	Port         int    // IMAP server port (typically 993 for TLS)
-	User         string // IMAP login username (full email)
-	Pass         string // IMAP login password
+	Host string // IMAP server hostname
+	Port int    // IMAP server port (typically 993 for TLS)
+	User string // IMAP login username (full email)
+	Pass string // IMAP login password, used when TokenSource is nil
+
+	// TokenSource, when set, gives the OAuth2 access tokens for an XOAUTH2 login in place of Pass.
+	// Each connection asks it for a token, so it must be safe for concurrent use, as the
+	// sources of golang.org/x/oauth2 are.
+	TokenSource oauth2.TokenSource
+
 	PollInterval time.Duration
 	Logger       *slog.Logger
 
@@ -191,9 +198,14 @@ const imapCommandTimeout = 30 * time.Second
 // connect dials the server and logs in. The end of ctx closes the connection, so ctx
 // bounds every command on it. The returned func logs out and closes the connection.
 func (p *IMAPProvider) connect(ctx context.Context) (*client.Client, func(), error) {
+	// The token comes before the dial, so a token endpoint that fails opens no connection.
+	token, err := p.accessToken()
+	if err != nil {
+		return nil, nil, err
+	}
+
 	addr := net.JoinHostPort(p.Host, strconv.Itoa(p.Port))
 	var netConn net.Conn
-	var err error
 	if p.dialFn != nil {
 		netConn, err = p.dialFn(ctx, addr)
 	} else {
@@ -216,7 +228,7 @@ func (p *IMAPProvider) connect(ctx context.Context) (*client.Client, func(), err
 	c.ErrorLog = slog.NewLogLogger(p.Logger.Handler(), slog.LevelDebug)
 	c.Timeout = imapCommandTimeout
 
-	if err := c.Login(p.User, p.Pass); err != nil {
+	if err := p.login(c, token); err != nil {
 		if !stop() {
 			return nil, nil, fmt.Errorf("IMAP connection: %w", ctx.Err())
 		}
@@ -232,6 +244,61 @@ func (p *IMAPProvider) connect(ctx context.Context) (*client.Client, func(), err
 		_ = c.Terminate()
 	}
 	return c, closeConn, nil
+}
+
+// permanentTokenError tells whether code is an OAuth2 token error code (RFC 6749
+// section 5.2) that a retry with the same client and refresh token gets again.
+func permanentTokenError(code string) bool {
+	switch code {
+	case "invalid_client",
+		"invalid_grant", // the refresh token expired or was revoked
+		"invalid_scope",
+		"unauthorized_client":
+		return true
+	}
+	return false
+}
+
+// accessToken returns an access token from TokenSource, or "" when TokenSource is nil.
+// It returns an error that matches ErrEmailLogin when the token endpoint refuses the
+// client or the grant.
+func (p *IMAPProvider) accessToken() (string, error) {
+	if p.TokenSource == nil {
+		return "", nil
+	}
+	tok, err := p.TokenSource.Token()
+	if err != nil {
+		if retrieveErr, ok := errors.AsType[*oauth2.RetrieveError](err); ok && permanentTokenError(retrieveErr.ErrorCode) {
+			return "", fmt.Errorf("%w: getting OAuth2 token: %w", ErrEmailLogin, err)
+		}
+		return "", fmt.Errorf("getting OAuth2 token: %w", err)
+	}
+	return tok.AccessToken, nil
+}
+
+// login authenticates c with XOAUTH2 when token is set, and with LOGIN and Pass otherwise.
+// connect wraps the error with ErrEmailLogin, so the server's text stays the end of the message.
+func (p *IMAPProvider) login(c *client.Client, token string) error {
+	if token == "" {
+		return c.Login(p.User, p.Pass) //nolint:wrapcheck // connect wraps it.
+	}
+	return c.Authenticate(&xoauth2Client{user: p.User, token: token}) //nolint:wrapcheck // connect wraps it.
+}
+
+// xoauth2Client is the sasl.Client of the XOAUTH2 mechanism that Gmail and Outlook use.
+// go-sasl lacks it.
+type xoauth2Client struct {
+	user, token string
+}
+
+func (a *xoauth2Client) Start() (mech string, ir []byte, err error) {
+	return "XOAUTH2", []byte("user=" + a.user + "\x01auth=Bearer " + a.token + "\x01\x01"), nil
+}
+
+// Next answers the challenge that carries the server's JSON error. XOAUTH2 wants an
+// empty response to it, after which the server ends the exchange with NO.
+func (a *xoauth2Client) Next(_ []byte) ([]byte, error) {
+	return []byte{}, nil
 }
 
 // searchAndExtract returns the verification code in the unseen mail to

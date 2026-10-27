@@ -117,7 +117,7 @@ func TestLoadConfig(t *testing.T) {
 	)
 	count := []func(*config.Config){func(cfg *config.Config) { cfg.Concurrency.AccountCount = 7 }}
 	withEmail := config.Defaults()
-	withEmail.Email = config.EmailConfig{IMAPHost: "mail.example.com", IMAPPort: 993, IMAPUser: "user", IMAPPass: "pass", IMAPDomains: []string{"example.com"}}
+	withEmail.Email = config.EmailConfig{IMAPHost: "mail.example.com", IMAPPort: 993, IMAPUser: "user", IMAPPass: "pass", IMAPDomains: []string{"example.com"}, Auth: config.AuthPassword}
 	withEmail.Concurrency.AccountCount = 7
 	tests := []struct {
 		name, mode, content string

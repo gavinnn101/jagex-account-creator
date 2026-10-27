@@ -18,6 +18,24 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for EmailConfigAuth.
+const (
+	EmailAuthOAuth2   EmailConfigAuth = "oauth2"
+	EmailAuthPassword EmailConfigAuth = "password"
+)
+
+// Valid indicates whether the value is a known member of the EmailConfigAuth enum.
+func (e EmailConfigAuth) Valid() bool {
+	switch e {
+	case EmailAuthOAuth2:
+		return true
+	case EmailAuthPassword:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RunSource.
 const (
 	RunSourceCLI   RunSource = "cli"
@@ -312,6 +330,9 @@ type Config struct {
 
 // EmailConfig defines model for EmailConfig.
 type EmailConfig struct {
+	// Auth password logs in with imap_pass, oauth2 with XOAUTH2 and an access token from the refresh token of oauth2
+	Auth EmailConfigAuth `json:"auth"`
+
 	// ImapDomains The domains of the new addresses. Each attempt takes one at random.
 	ImapDomains []string `json:"imap_domains"`
 	ImapHost    string   `json:"imap_host"`
@@ -323,7 +344,13 @@ type EmailConfig struct {
 	ImapPassSet *bool  `json:"imap_pass_set,omitempty"`
 	ImapPort    int    `json:"imap_port"`
 	ImapUser    string `json:"imap_user"`
+
+	// Oauth2 The refresh-token grant of an XOAUTH2 login. Only an email section whose auth is oauth2 uses it.
+	Oauth2 OAuth2Config `json:"oauth2"`
 }
+
+// EmailConfigAuth password logs in with imap_pass, oauth2 with XOAUTH2 and an access token from the refresh token of oauth2
+type EmailConfigAuth string
 
 // Error defines model for Error.
 type Error struct {
@@ -360,9 +387,29 @@ type MailboxCheck struct {
 	Ok bool `json:"ok"`
 }
 
+// OAuth2Config The refresh-token grant of an XOAUTH2 login. Only an email section whose auth is oauth2 uses it.
+type OAuth2Config struct {
+	ClientId string `json:"client_id"`
+
+	// ClientSecret Absent in a response. In a request, absent means the stored client secret. Empty for a public client.
+	ClientSecret *string `json:"client_secret,omitempty"`
+
+	// ClientSecretSet True when the config of serve, as read at start or last saved, holds a client secret. A request ignores it.
+	ClientSecretSet *bool `json:"client_secret_set,omitempty"`
+
+	// RefreshToken Absent in a response. In a request, absent means the stored refresh token.
+	RefreshToken *string `json:"refresh_token,omitempty"`
+
+	// RefreshTokenSet True when the config of serve, as read at start or last saved, holds a refresh token. A request ignores it.
+	RefreshTokenSet *bool `json:"refresh_token_set,omitempty"`
+
+	// TokenUrl The token endpoint, for example https://oauth2.googleapis.com/token
+	TokenUrl string `json:"token_url"`
+}
+
 // Preset One named run config of the store. It holds no IMAP password.
 type Preset struct {
-	// Config The config of the preset. database and email.imap_pass_set are the values of the config of serve, not the saved values.
+	// Config The config of the preset. database, email.imap_pass_set, email.oauth2.client_secret_set and email.oauth2.refresh_token_set are the values of the config of serve, not the saved values.
 	Config Config `json:"config"`
 	Id     int64  `json:"id"`
 

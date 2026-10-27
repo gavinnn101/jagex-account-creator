@@ -25,6 +25,7 @@ cmd/
     flags.go             # CLI flags and their config overrides
     workers.go           # Worker pool, Chrome slots and the failure backoff
     attempt.go           # One account creation attempt and its browser half
+    emailauth.go         # The IMAP provider of the email section, with a password or an OAuth2 (XOAUTH2) login
     browserphase.go      # Chrome launch, CDP set-up, the page load and the clearance wait of both modes
     proxy.go             # The proxy load of a run from the store, and the forward proxies and the proxy cooldown of one attempt
     register.go          # The HTTP registration of one attempt and the login-link fetch
@@ -120,6 +121,7 @@ internal/
       0003_proxies.sql   # The STRICT proxies table: one row for each proxy with its credentials. Also the index of the attempts on their proxy
       0004_presets.sql   # The STRICT presets table: one row for each named run config
       0005_imap_domains.sql # The one imap_domain of each stored run and preset config becomes the one item of imap_domains
+      0006_email_auth.sql # Each stored run and preset config with no email.auth gets auth password and an empty oauth2 section
   useragent/
     clienthints.go       # Shared ClientHints type (used by browser + jagexapi packages). It maps each hint to its header name
     language.go          # The browser language: Chrome's --accept-lang and the HTTP client's accept-language
@@ -493,13 +495,19 @@ proxy:
   direct: false          # Run with no proxy and ignore the list
 
 email:
-  # Required: imap_host, imap_user, imap_pass, imap_domains.
+  # Required: imap_host, imap_user, imap_domains, and the login of auth.
   # A failed login at start stops the run.
   imap_host: ""
   imap_port: 993
   imap_user: ""
-  imap_pass: ""
+  imap_pass: ""          # Required when auth is password
   imap_domains: []       # Domains of the generated addresses (e.g., [example.com, example.org]). Each attempt takes one at random
+  auth: password         # password, or oauth2 for an XOAUTH2 login (Gmail, Outlook)
+  oauth2:                # Used when auth is oauth2. client_id, refresh_token and token_url are required
+    client_id: ""
+    client_secret: ""    # Empty for a public client
+    refresh_token: ""
+    token_url: ""        # An http or https URL, e.g. https://oauth2.googleapis.com/token
 
 account:
   password_length: 16
@@ -549,7 +557,7 @@ A posted config whose `database` differs from the database of serve is invalid. 
 
 The contract is `internal/api/openapi.yaml` (OpenAPI 3.1). oapi-codegen generates `internal/api/api.gen.go` from it. The `//go:generate` line in `internal/api/generate.go` pins the generator version. `make generate` runs it, and CI fails when the committed file differs from the generator output. Do not edit `api.gen.go`. openapi-typescript generates the dashboard types `web/src/lib/api.gen.d.ts` from the same spec. `npm --prefix web run gen:api` runs it, and the same CI step checks that file.
 
-The API never sends the IMAP password. `GET /api/config` sends `imap_pass_set` in its place. In a request, an absent `imap_pass` means the password of the config of serve, as read at start or last saved.
+The API never sends an email secret: the IMAP password, the OAuth2 client secret or the refresh token. `GET /api/config` sends `imap_pass_set`, `oauth2.client_secret_set` and `oauth2.refresh_token_set` in their place. In a request, an absent `imap_pass`, `client_secret` or `refresh_token` means the one of the config of serve, as read at start or last saved. `orStored` in `cmd/creator/serve_api.go` is the one home of that rule.
 
 Limitation: a preset holds no IMAP password, so a preset of another mailbox needs the password typed before Start. It fails toward a 422 or a run against serve's mailbox, never toward a stored password.
 
@@ -657,7 +665,7 @@ These endpoints read and write the run presets of the store (see "Account store 
 - `POST /api/presets` saves the posted config under the posted name. It validates the config as a run start does. A preset with the same name gets the new config and keeps its id. The answer is 200 with the preset. Serve logs one INFO line `preset saved` with the id and the name.
 - `DELETE /api/presets/{id}` deletes one preset and returns 204. Serve logs one INFO line `preset deleted` with the id.
 
-The list and the save answer each preset with the values of the config of serve in `database` and `email.imap_pass_set`. They do not send the stored values.
+The list and the save answer each preset with the values of the config of serve in `database`, `email.imap_pass_set`, `email.oauth2.client_secret_set` and `email.oauth2.refresh_token_set`. They do not send the stored values.
 
 An empty name, a body that does not parse, or a bad duration gets 400. An invalid config, or a `database` other than the database of serve, gets 422. A preset that does not exist gets 404.
 
@@ -1096,6 +1104,12 @@ type Provider interface {
 
 `IMAPProvider`, with IDLE support, is the only implementation. It matches a mail by its full recipient address, so it reads the mail of each domain of `imap_domains`. `account.GenerateEmail` makes the address. The config loader fails when a required IMAP field is empty. The run checks the mailbox login at start.
 
+`email.auth` picks the login. `password` sends LOGIN with `imap_pass`. `oauth2` sends `AUTHENTICATE XOAUTH2` with an access token. `newEmailProvider` (`cmd/creator/emailauth.go`) gives the provider a `golang.org/x/oauth2` token source of the refresh-token grant, so each connection asks it for a token, and the source refreshes the token only when it expires. The token comes before the dial, so a failed refresh opens no connection.
+
+A token error with the code `invalid_client`, `invalid_grant`, `invalid_scope` or `unauthorized_client` matches `ErrEmailLogin`, so a refused grant fails the attempt as a refused password does. Any other token error, such as a timeout or a 5xx, is a failed connection, and the code wait tries again.
+
+Limitation: a token endpoint that rotates the refresh token gives a new one that the config never stores. Google and Microsoft keep the old one valid.
+
 ---
 
 ## Error Handling Patterns
@@ -1269,6 +1283,7 @@ github.com/sardanioss/httpcloak    — TLS-fingerprinted HTTP client (TLS-only m
 github.com/emersion/go-imap        — IMAP client for email verification
 gopkg.in/yaml.v3                   — YAML config parsing
 golang.org/x/net                   — SOCKS5 client of the forward proxy, and the HTTP/2 frame reader of the wire test
+golang.org/x/oauth2                — The refresh-token grant of the XOAUTH2 mailbox login
 golang.org/x/sync                  — errgroup (concurrent workers) and semaphore (Chrome slots)
 golang.org/x/sys                   — Windows version-resource reads and the console mode of stderr
 golang.org/x/term                  — Terminal check of stderr on Unix

@@ -27,12 +27,16 @@ export function runDigest({ concurrency, proxy }: Config): string {
   ].join(', ');
 }
 
-/** Returns the mailbox as one line, for example "user@example.com at mail.example.com:993". It never holds the password. */
+/**
+ * Returns the mailbox as one line, for example "user@example.com at mail.example.com:993",
+ * with ", OAuth2" after it for an OAuth2 login. It never holds a secret.
+ */
 export function mailboxDigest({ email }: Config): string {
   if (email.imap_user === '' || email.imap_host === '') {
     return 'Not set';
   }
-  return `${email.imap_user} at ${email.imap_host}:${String(email.imap_port)}`;
+  const mailbox = `${email.imap_user} at ${email.imap_host}:${String(email.imap_port)}`;
+  return email.auth === 'oauth2' ? `${mailbox}, OAuth2` : mailbox;
 }
 
 /** Returns the account settings as one line, for example "16-character passwords, TOTP on". */

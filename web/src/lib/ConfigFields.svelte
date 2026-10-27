@@ -11,6 +11,7 @@
   import Checkbox from '#lib/ui/Checkbox.svelte';
   import Details from '#lib/ui/Details.svelte';
   import Field from '#lib/ui/Field.svelte';
+  import Select from '#lib/ui/Select.svelte';
   import TextArea from '#lib/ui/TextArea.svelte';
 
   interface Props {
@@ -34,6 +35,37 @@
     } else {
       config.email.imap_pass = value;
     }
+  }
+
+  // The OAuth2 secrets are write-only too: an empty field sends no key, and serve keeps its stored one.
+  function setClientSecret(value: string | null): void {
+    if (!value) {
+      delete config.email.oauth2.client_secret;
+    } else {
+      config.email.oauth2.client_secret = value;
+    }
+  }
+
+  function setRefreshToken(value: string | null): void {
+    if (!value) {
+      delete config.email.oauth2.refresh_token;
+    } else {
+      config.email.oauth2.refresh_token = value;
+    }
+  }
+
+  const authOptions = [
+    { value: 'password', text: 'Password' },
+    { value: 'oauth2', text: 'OAuth2 (XOAUTH2)' },
+  ];
+
+  // The select gives a string. Its options are the values of auth in the contract.
+  function setAuth(value: string | undefined): void {
+    config.email.auth = value as typeof config.email.auth;
+  }
+
+  function storedPlaceholder(set: boolean | undefined): string | undefined {
+    return set ? 'Stored. Empty keeps it.' : undefined;
   }
 
   // The typed text of the domains, so a blank line or a trailing newline stays while the user types.
@@ -115,13 +147,40 @@
           }
         />
         <Field label="IMAP user" autocomplete="off" bind:value={config.email.imap_user} />
-        <Field
-          label="IMAP password"
-          type="password"
-          autocomplete="new-password"
-          placeholder={config.email.imap_pass_set ? 'Stored. Empty keeps it.' : undefined}
-          bind:value={() => config.email.imap_pass ?? '', setPass}
-        />
+        <Select label="Login" options={authOptions} bind:value={() => config.email.auth, setAuth} />
+        {#if config.email.auth === 'password'}
+          <Field
+            label="IMAP password"
+            type="password"
+            autocomplete="new-password"
+            placeholder={storedPlaceholder(config.email.imap_pass_set)}
+            bind:value={() => config.email.imap_pass ?? '', setPass}
+          />
+        {:else}
+          <Field label="Client ID" autocomplete="off" bind:value={config.email.oauth2.client_id} />
+          <Field
+            label="Client secret"
+            type="password"
+            autocomplete="new-password"
+            hint="Empty for a public client."
+            placeholder={storedPlaceholder(config.email.oauth2.client_secret_set)}
+            bind:value={() => config.email.oauth2.client_secret ?? '', setClientSecret}
+          />
+          <Field
+            label="Refresh token"
+            type="password"
+            autocomplete="new-password"
+            placeholder={storedPlaceholder(config.email.oauth2.refresh_token_set)}
+            bind:value={() => config.email.oauth2.refresh_token ?? '', setRefreshToken}
+          />
+          <Field
+            label="Token URL"
+            type="url"
+            autocomplete="off"
+            hint="For example https://oauth2.googleapis.com/token."
+            bind:value={config.email.oauth2.token_url}
+          />
+        {/if}
         <div class="sm:col-span-2 lg:col-span-4">
           <TextArea
             label="IMAP domains"
