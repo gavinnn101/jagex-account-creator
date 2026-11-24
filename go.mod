@@ -9,7 +9,7 @@ require (
 	github.com/lmittmann/tint v1.2.1
 	github.com/mafredri/cdp v0.35.0
 	github.com/oapi-codegen/runtime v1.7.0
-	github.com/sardanioss/httpcloak v1.7.3
+	github.com/sardanioss/httpcloak v1.7.4
 	golang.org/x/net v0.61.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
@@ -32,9 +32,9 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/sardanioss/http v1.2.0 // indirect
-	github.com/sardanioss/net v1.2.12 // indirect
+	github.com/sardanioss/net v1.2.14 // indirect
 	github.com/sardanioss/qpack v0.6.3 // indirect
-	github.com/sardanioss/quic-go v1.2.30 // indirect
+	github.com/sardanioss/quic-go v1.2.31 // indirect
 	github.com/sardanioss/udpbara v1.1.0 // indirect
 	github.com/sardanioss/utls v1.10.5 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
