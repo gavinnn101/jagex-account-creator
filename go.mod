@@ -1,6 +1,6 @@
 module jagex_account_creator
 
-go 1.27.3
+go 1.27.4
 
 ignore ./web/node_modules
 
@@ -19,13 +19,13 @@ require (
 )
 
 require (
-	github.com/andybalholm/brotli v1.2.6 // indirect
+	github.com/andybalholm/brotli v1.2.8 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/klauspost/compress v1.20.1 // indirect
+	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4 // indirect
+	github.com/klauspost/compress v1.20.5 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/miekg/dns v1.1.73 // indirect
