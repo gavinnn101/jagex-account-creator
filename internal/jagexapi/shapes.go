@@ -17,7 +17,7 @@ type requestShape struct {
 
 // ShapeChromeMajor is the Chrome major that the shapes and the TLS preset copy.
 // On a bump, measure the shapes again. httpcloak must have a preset for the new major.
-const ShapeChromeMajor = 155
+const ShapeChromeMajor = 157
 
 const (
 	// navigationAccept is the accept of a page load.
